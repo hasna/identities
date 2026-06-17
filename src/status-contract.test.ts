@@ -9,7 +9,7 @@ const rootDir = join(import.meta.dir, "..");
 
 describe("identity reference status contract", () => {
   test("reports metadata only without contact values, credentials, private keys, document bodies, or raw identifiers", async () => {
-    const privatePathRoot = join(tmpdir(), "private-account-123-apple03");
+    const privatePathRoot = join(tmpdir(), "private-account-123-demo-host");
     await mkdir(privatePathRoot, { recursive: true });
     const dir = await mkdtemp(join(privatePathRoot, "open-identities-status-"));
     const storePath = join(dir, "identities.json");
@@ -33,7 +33,7 @@ describe("identity reference status contract", () => {
       },
       metadata: {
         githubAppId: "app-private-123",
-        githubAppPrivateKey: "-----BEGIN PRIVATE KEY----- raw private key -----END PRIVATE KEY-----",
+        githubAppPrivateKey: "synthetic private key material",
         credential: "ghp_raw_private_token",
       },
     });
@@ -79,7 +79,7 @@ describe("identity reference status contract", () => {
       expect(serialized).not.toContain("raw private key");
       expect(serialized).not.toContain("ghp_raw_private_token");
       expect(serialized).not.toContain(privatePathRoot);
-      expect(serialized).not.toContain("apple03");
+      expect(serialized).not.toContain("demo-host");
 
       const cli = Bun.spawnSync({
         cmd: ["bun", "src/cli.ts", "--store", storePath, "--json", "status"],
@@ -96,7 +96,7 @@ describe("identity reference status contract", () => {
       expect(output).not.toContain("Private GitHub App Operator");
       expect(output).not.toContain("raw private key");
       expect(output).not.toContain(privatePathRoot);
-      expect(output).not.toContain("apple03");
+      expect(output).not.toContain("demo-host");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
