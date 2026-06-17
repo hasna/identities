@@ -1,0 +1,4 @@
+- git
+- github
+- npm
+- ci

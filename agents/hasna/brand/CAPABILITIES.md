@@ -1,0 +1,3 @@
+- Maintain naming, voice, and presentation standards
+- Review public copy for consistency
+- Coordinate design and communications on launches

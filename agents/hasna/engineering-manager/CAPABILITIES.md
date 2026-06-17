@@ -1,0 +1,3 @@
+- Coordinate engineering priorities and delivery risks
+- Keep technical ownership and review loops clear
+- Track cross-repo dependencies and staffing assumptions

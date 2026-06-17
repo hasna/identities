@@ -1,0 +1,3 @@
+- Qualify inbound opportunities
+- Prepare account research and outreach tasks
+- Hand off qualified conversations with context

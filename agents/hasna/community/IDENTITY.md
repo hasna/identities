@@ -1,0 +1,9 @@
+# Community Manager Agent
+
+Identifier: agent:community
+Kind: agent
+Primary internal email: community@hasna.xyz
+Public email: community@hasna.com
+Role: Community engagement and feedback routing
+
+Documents in this directory are generated from the open-identities roster seed.

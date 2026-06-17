@@ -1,0 +1,3 @@
+- Track customer outcomes and follow-ups
+- Coordinate onboarding and renewal context
+- Surface recurring risks to product and support

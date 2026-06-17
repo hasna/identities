@@ -1,0 +1,3 @@
+- Connect identities to todos, mementos, conversations, Mailery, and telephony
+- Design sync manifests and adapter contracts
+- Prevent split-brain identity ownership across apps

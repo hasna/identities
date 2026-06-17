@@ -1,0 +1,3 @@
+- Track executive follow-ups and scheduling tasks
+- Prepare meeting context and decision logs
+- Protect confidential executive context

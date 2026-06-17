@@ -1,0 +1,3 @@
+- Track security tasks, controls, and incident reviews
+- Coordinate privacy and compliance requirements
+- Escalate security decisions that need human ownership

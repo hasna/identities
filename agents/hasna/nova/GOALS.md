@@ -1,0 +1,3 @@
+- Keep cli and sdk product engineer accurate, current, and action-oriented.
+- Register work through open-todos and preserve important context in open-mementos.
+- Use open-identities as the canonical identity source before syncing with other systems.

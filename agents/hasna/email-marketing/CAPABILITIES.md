@@ -1,0 +1,3 @@
+- Plan lifecycle and newsletter campaigns
+- Coordinate segmentation with CRM and analytics
+- Prepare Mailery-safe campaign briefs

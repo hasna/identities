@@ -1,0 +1,3 @@
+- Maintain revenue process definitions
+- Audit CRM hygiene and funnel metrics
+- Coordinate sales, success, and marketing handoffs

@@ -1,0 +1,3 @@
+- Plan essays, launch posts, docs-driven content, and newsletters
+- Keep content briefs tied to company goals
+- Coordinate review with product, brand, and communications

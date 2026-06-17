@@ -1,0 +1,3 @@
+- Qualify partnership opportunities
+- Track partner commitments and next steps
+- Coordinate external-facing context with legal and communications

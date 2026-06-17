@@ -1,0 +1,3 @@
+- Maintain financial reporting checklists
+- Prepare reconciliations and close-review tasks
+- Escalate tax, legal, and compliance questions

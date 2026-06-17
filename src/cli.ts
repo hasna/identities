@@ -7,14 +7,15 @@ import { createEcosystemRegistrationManifest, createAgentIdentityRef } from "./e
 import { identityToAgentManifest } from "./core.js";
 import { syncIdentityContactPointsAndUpdate } from "./integrations.js";
 import { writeEveAgent } from "./eve.js";
+import { seedHasnaCompanyAgents } from "./roster.js";
 
 interface ParsedArgs {
   positionals: string[];
   flags: Map<string, string[]>;
 }
 
-const version = "0.1.0";
-const booleanFlags = new Set(["json", "help", "h", "version"]);
+const version = "0.1.1";
+const booleanFlags = new Set(["json", "help", "h", "version", "keep-deprecated"]);
 
 const helpText = `identities
 
@@ -35,6 +36,7 @@ Commands:
   doc import <id|identifier> --dir <dir>
   agent manifest <id|identifier>
   agent register --name <name> [--identifier agent:name]
+  agent seed-company [--docs-dir dir] [--keep-deprecated]
   eve export <id|identifier> --out <dir>
   sync <id|identifier>
   validate
@@ -241,6 +243,14 @@ async function dispatchAgent(rest: string[], parsed: ParsedArgs, store: Identity
       uniqueIdentifier: flagValue(parsed, "identifier") ?? `agent:${slugify(required(flagValue(parsed, "name"), "agent register requires --name"))}`,
     });
     output(identityToAgentManifest(identity), json);
+    return;
+  }
+
+  if (subcommand === "seed-company") {
+    output(await seedHasnaCompanyAgents(store, {
+      docsDir: flagValue(parsed, "docs-dir"),
+      pruneDeprecated: !hasFlag(parsed, "keep-deprecated"),
+    }), json);
     return;
   }
 

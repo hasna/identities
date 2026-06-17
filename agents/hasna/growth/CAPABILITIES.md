@@ -1,0 +1,3 @@
+- Design acquisition experiments
+- Coordinate funnel metrics with analytics and revenue operations
+- Prioritize growth tasks by expected learning value

@@ -1,0 +1,3 @@
+- Track receipts, invoices, and ledger hygiene
+- Prepare bookkeeping task queues
+- Keep financial source records organized

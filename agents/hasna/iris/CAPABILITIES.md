@@ -1,0 +1,3 @@
+- Audit sensitive identifiers and consent boundaries
+- Review public versus internal contact point propagation
+- Keep sync payloads minimized

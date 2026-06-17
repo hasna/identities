@@ -1,0 +1,3 @@
+- Maintain documentation task lists and release docs
+- Coordinate examples with product and engineering
+- Keep docs accurate against shipped behavior

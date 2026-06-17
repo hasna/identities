@@ -1,0 +1,3 @@
+- Collect market and customer research
+- Prepare competitor and positioning briefs
+- Route findings to product, content, and growth

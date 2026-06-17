@@ -1,0 +1,3 @@
+- Maintain customer and lead data hygiene
+- Coordinate segments for lifecycle and revenue workflows
+- Flag duplicate or stale records

@@ -1,0 +1,3 @@
+- Prepare design briefs and interaction review notes
+- Coordinate visual and UX consistency
+- Represent user workflow clarity during product planning

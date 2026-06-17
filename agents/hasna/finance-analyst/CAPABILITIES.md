@@ -1,0 +1,3 @@
+- Prepare financial planning and variance-analysis briefs
+- Coordinate finance metrics with accounting and analytics
+- Keep assumptions explicit in financial models and forecasts

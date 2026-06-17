@@ -1,0 +1,3 @@
+- Design identity schemas and migration paths
+- Review identifier uniqueness and privacy boundaries
+- Keep agent, human, and organization identity contracts coherent

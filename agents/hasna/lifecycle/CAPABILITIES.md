@@ -1,0 +1,3 @@
+- Plan onboarding, activation, and retention journeys
+- Coordinate lifecycle emails with CRM and analytics
+- Keep campaign logic consent-aware

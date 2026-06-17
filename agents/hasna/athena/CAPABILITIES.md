@@ -1,0 +1,3 @@
+- Score architecture, tests, privacy, and integration completeness
+- Compare delivered behavior against written goals
+- Block premature completion when evidence is weak

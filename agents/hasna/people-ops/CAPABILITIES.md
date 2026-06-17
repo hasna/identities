@@ -1,0 +1,3 @@
+- Maintain onboarding, offboarding, and internal process tasks
+- Coordinate team rituals and internal documentation
+- Protect sensitive employee information

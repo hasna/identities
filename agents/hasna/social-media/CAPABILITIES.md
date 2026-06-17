@@ -1,0 +1,3 @@
+- Plan social calendars and post briefs
+- Coordinate platform-specific copy and assets
+- Route product, support, and brand-sensitive replies

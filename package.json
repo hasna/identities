@@ -1,6 +1,6 @@
 {
   "name": "@hasna/identities",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Open identity records for humans and AI agents",
   "type": "module",
   "main": "dist/index.js",
@@ -28,6 +28,10 @@
     "./eve": {
       "types": "./dist/eve.d.ts",
       "import": "./dist/eve.js"
+    },
+    "./roster": {
+      "types": "./dist/roster.d.ts",
+      "import": "./dist/roster.js"
     }
   },
   "files": [
@@ -40,11 +44,12 @@
     "SOUL.md",
     "PERSONALITY.md",
     "ETHOS.md",
-    "docs"
+    "docs",
+    "agents"
   ],
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "bun run clean && bun build src/index.ts src/storage.ts src/integrations.ts src/ecosystem.ts src/eve.ts src/cli.ts --outdir dist --target bun && tsc --emitDeclarationOnly --outDir dist",
+    "build": "bun run clean && bun build src/index.ts src/storage.ts src/integrations.ts src/ecosystem.ts src/eve.ts src/roster.ts src/cli.ts --outdir dist --target bun && tsc --emitDeclarationOnly --outDir dist",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "verify:release": "bun run typecheck && bun test && bun run build && npm pack --dry-run --ignore-scripts",

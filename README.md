@@ -15,6 +15,7 @@ npm install -g @hasna/identities
 ## CLI
 
 ```bash
+identities --help
 identities create --kind agent --name "Ava Example" --identifier agent:ava-example --email ava@example.com --phone +15555550123
 identities list
 identities show agent:ava-example
@@ -22,12 +23,23 @@ identities link-email agent:ava-example ava@hasna.com
 identities link-phone agent:ava-example +15555550199
 identities doc set agent:ava-example ethos "Protect user intent and identity data."
 identities agent manifest agent:ava-example --json
+identities agent seed-company --docs-dir agents/hasna --json
 identities eve export agent:ava-example --out ./ava-agent
 identities validate --json
 ```
 
 Data is stored in `~/.hasna/identities/identities.json`.
 Use `OPEN_IDENTITIES_STORE=/path/to/identities.json` or `--store <path>` for isolated scripts and tests.
+
+## Hasna Company Agent Roster
+
+The package includes a deterministic Hasna company-agent roster for vertical roles such as email marketing, accounting, bookkeeping, social media management, support, sales, legal operations, security, product, design, and engineering management.
+
+```bash
+identities agent seed-company --docs-dir agents/hasna --json
+```
+
+The seed command upserts the roster into the selected identity store, prunes the deprecated `agent:hermes` record by default, and exports per-agent markdown files. Every seeded agent uses an internal primary email in the form `<agent-name>@hasna.xyz`. Only externally facing roles receive secondary public `hasna.com` addresses, such as `marketing@hasna.com`, `sales@hasna.com`, `support@hasna.com`, and `security@hasna.com`.
 
 ## SDK
 

@@ -1,0 +1,3 @@
+- Track vendors, renewals, and purchase requests
+- Coordinate approvals with finance and legal operations
+- Maintain source-of-truth vendor context

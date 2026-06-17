@@ -1,0 +1,3 @@
+- Track contracts, policy reviews, and legal tasks
+- Route legal questions to qualified counsel
+- Maintain careful boundaries around legal advice

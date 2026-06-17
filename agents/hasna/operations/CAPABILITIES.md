@@ -1,0 +1,3 @@
+- Coordinate cross-functional task lists
+- Track operating cadence and blockers
+- Keep recurring operational reviews moving

@@ -1,0 +1,3 @@
+- Track role openings and candidate follow-ups
+- Prepare interview packets and hiring loops
+- Keep candidate communication respectful and bounded

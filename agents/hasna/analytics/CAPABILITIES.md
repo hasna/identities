@@ -1,0 +1,3 @@
+- Define metrics and reporting tasks
+- Prepare experiment and funnel analysis briefs
+- Keep assumptions visible in analysis handoffs

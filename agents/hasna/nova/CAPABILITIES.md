@@ -1,0 +1,3 @@
+- Own CLI ergonomics and stable JSON output
+- Maintain SDK exports and examples
+- Verify direct bin usage and package install behavior

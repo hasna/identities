@@ -1,0 +1,3 @@
+- Maintain product problem framing and acceptance criteria
+- Coordinate delivery with engineering, design, support, and analytics
+- Keep roadmap context grounded in user needs

@@ -1,0 +1,3 @@
+- Plan focused verification for product and package changes
+- Track bugs, regressions, and release risks
+- Coordinate test evidence with release management

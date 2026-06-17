@@ -22,6 +22,14 @@ export { createIdentityStore, getIdentityDataDir, getIdentityStorePath, Identity
 export { createAgentIdentityRef, createEcosystemRegistrationManifest } from "./ecosystem.js";
 export { listEveDocumentKeys, writeEveAgent } from "./eve.js";
 export { applyContactPointSyncResults, syncIdentityContactPoints, syncIdentityContactPointsAndUpdate } from "./integrations.js";
+export {
+  HASNA_COMPANY_AGENT_ROSTER_VERSION,
+  createHasnaCompanyAgentInputs,
+  deprecatedHasnaCompanyAgentIdentifiers,
+  hasnaCompanyAgentSpecs,
+  seedHasnaCompanyAgents,
+  writeIdentityDocumentFiles,
+} from "./roster.js";
 export { identityDocumentKeys } from "./types.js";
 export type {
   AgentIdentityRef,
@@ -40,6 +48,11 @@ export type {
   TelephonyIdentityAdapter,
   TelephonyIdentitySyncInput,
 } from "./integrations.js";
+export type {
+  HasnaCompanyAgentSpec,
+  SeedHasnaCompanyAgentsOptions,
+  SeedHasnaCompanyAgentsResult,
+} from "./roster.js";
 export type {
   AgentProfile,
   AgentRegistrationManifest,

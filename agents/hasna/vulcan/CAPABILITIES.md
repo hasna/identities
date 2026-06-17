@@ -1,0 +1,3 @@
+- Coordinate release tasks, tags, changelogs, and publish checks
+- Keep GitHub and npm release state aligned
+- Track post-release verification

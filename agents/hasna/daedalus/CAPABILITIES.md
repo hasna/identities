@@ -1,0 +1,3 @@
+- Maintain durable identity storage
+- Harden validation, imports, exports, and audit logs
+- Plan future SQLite and locking upgrades

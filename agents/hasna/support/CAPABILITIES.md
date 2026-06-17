@@ -1,0 +1,3 @@
+- Triage support conversations
+- Route incidents, bugs, and account requests
+- Maintain support macros and escalation context

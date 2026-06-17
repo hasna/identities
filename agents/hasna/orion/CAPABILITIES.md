@@ -1,0 +1,3 @@
+- Map identity documents into Eve agent directories
+- Maintain agent tools, skills, schedules, and instructions exports
+- Check Eve compatibility as the framework evolves

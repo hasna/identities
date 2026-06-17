@@ -2,7 +2,16 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { createIdentity, IdentityStore, syncIdentityContactPoints, syncIdentityContactPointsAndUpdate, writeEveAgent } from "./index.js";
+import {
+  createHasnaCompanyAgentInputs,
+  createIdentity,
+  hasnaCompanyAgentSpecs,
+  IdentityStore,
+  seedHasnaCompanyAgents,
+  syncIdentityContactPoints,
+  syncIdentityContactPointsAndUpdate,
+  writeEveAgent,
+} from "./index.js";
 import { runCli } from "./cli.js";
 
 describe("open-identities", () => {
@@ -154,7 +163,56 @@ describe("open-identities", () => {
     const versionOutput = await captureStdout(async () => {
       await runCli(["--json", "version"]);
     });
-    expect(JSON.parse(versionOutput).version).toBe("0.1.0");
+    expect(JSON.parse(versionOutput).version).toBe("0.1.1");
+  });
+
+  test("Hasna company roster uses internal hasna.xyz emails and avoids Hermes", () => {
+    const inputs = createHasnaCompanyAgentInputs();
+    expect(inputs.length).toBeGreaterThanOrEqual(35);
+    expect(hasnaCompanyAgentSpecs.some((spec) => spec.slug === "hermes" || spec.fullName.toLowerCase().includes("hermes"))).toBe(false);
+
+    for (const input of inputs) {
+      expect(String(input.uniqueIdentifier)).not.toContain("hermes");
+      const internalEmail = input.emails?.find((email) => typeof email !== "string" && email.label === "internal");
+      expect(internalEmail).toBeDefined();
+      if (typeof internalEmail !== "string") {
+        expect(internalEmail.address).toEndWith("@hasna.xyz");
+        expect(internalEmail.primary).toBe(true);
+      }
+      expect(input.documents?.prompt?.trim()).not.toBe("");
+      expect(input.documents?.soul?.trim()).not.toBe("");
+      expect(input.documents?.personality?.trim()).not.toBe("");
+      expect(input.documents?.ethos?.trim()).not.toBe("");
+    }
+  });
+
+  test("CLI seeds company agents and exports markdown documents", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-roster-"));
+    const storePath = join(dir, "identities.json");
+    const docsDir = join(dir, "agents");
+    const store = new IdentityStore({ filePath: storePath, auditPath: join(dir, "audit.jsonl") });
+
+    await store.create({
+      kind: "agent",
+      fullName: "Hermes CLI SDK Engineer",
+      uniqueIdentifier: "agent:hermes",
+      emails: ["hermes@agents.hasna.local"],
+    });
+
+    const seedOutput = await captureStdout(async () => {
+      await runCli(["--json", "--store", storePath, "agent", "seed-company", "--docs-dir", docsDir]);
+    });
+    const seeded = JSON.parse(seedOutput);
+    expect(seeded.deleted).toEqual(["agent:hermes"]);
+    expect(seeded.documents.length).toBeGreaterThan(100);
+
+    const updatedStore = new IdentityStore({ filePath: storePath, auditPath: join(dir, "audit.jsonl") });
+    await expect(updatedStore.require("agent:hermes")).rejects.toThrow(/not found/);
+    const emailMarketing = await updatedStore.require("agent:email-marketing");
+    expect(emailMarketing.emails[0]).toMatchObject({ address: "email-marketing@hasna.xyz", label: "internal", primary: true });
+    expect(emailMarketing.emails.some((email) => email.address === "marketing@hasna.com" && email.label === "public")).toBe(true);
+    expect(await readFile(join(docsDir, "email-marketing", "PROMPT.md"), "utf8")).toContain("email-marketing@hasna.xyz");
+    expect(await readFile(join(docsDir, "email-marketing", "IDENTITY.md"), "utf8")).toContain("marketing@hasna.com");
   });
 });
 

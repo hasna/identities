@@ -1,0 +1,3 @@
+- Coordinate announcements and public statements
+- Route press-sensitive questions
+- Keep launch messaging aligned with product and brand
