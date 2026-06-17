@@ -33,13 +33,13 @@ Use `OPEN_IDENTITIES_STORE=/path/to/identities.json` or `--store <path>` for iso
 
 ## Hasna Company Agent Roster
 
-The package includes a deterministic Hasna company-agent roster for vertical roles such as email marketing, accounting, bookkeeping, social media management, support, sales, legal operations, security, product, design, and engineering management.
+The package includes a deterministic Hasna company-agent roster for vertical roles such as email marketing, accounting, bookkeeping, social media management, support, sales, legal operations, security, product, design, and engineering management. Every roster identity has a canonical Greek or Roman agent name.
 
 ```bash
 identities agent seed-company --docs-dir agents/hasna --json
 ```
 
-The seed command upserts the roster into the selected identity store, prunes the deprecated `agent:hermes` record by default, and exports per-agent markdown files. Every seeded agent uses an internal primary email in the form `<agent-name>@hasna.xyz`. Only externally facing roles receive secondary public `hasna.com` addresses, such as `marketing@hasna.com`, `sales@hasna.com`, `support@hasna.com`, and `security@hasna.com`.
+The seed command upserts the roster into the selected identity store, prunes deprecated non-classical identifiers by default, and exports per-agent markdown files. Every seeded agent uses an internal primary email in the form `<greek-or-roman-name>@hasna.xyz`, such as `calliope@hasna.xyz` for email marketing and `plutus@hasna.xyz` for accounting. Only externally facing roles receive secondary public `hasna.com` addresses, such as `marketing@hasna.com`, `sales@hasna.com`, `support@hasna.com`, and `security@hasna.com`.
 
 ## SDK
 

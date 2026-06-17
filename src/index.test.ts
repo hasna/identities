@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createHasnaCompanyAgentInputs,
   createIdentity,
+  deprecatedHasnaCompanyAgentIdentifiers,
   hasnaCompanyAgentSpecs,
   IdentityStore,
   seedHasnaCompanyAgents,
@@ -163,20 +164,67 @@ describe("open-identities", () => {
     const versionOutput = await captureStdout(async () => {
       await runCli(["--json", "version"]);
     });
-    expect(JSON.parse(versionOutput).version).toBe("0.1.1");
+    expect(JSON.parse(versionOutput).version).toBe("0.1.2");
   });
 
-  test("Hasna company roster uses internal hasna.xyz emails and avoids Hermes", () => {
+  test("Hasna company roster uses Greek or Roman agent names and internal hasna.xyz emails", () => {
     const inputs = createHasnaCompanyAgentInputs();
-    expect(inputs.length).toBeGreaterThanOrEqual(35);
+    const classicalSlugs = new Set([
+      "janus",
+      "cassandra",
+      "rhadamanthus",
+      "archimedes",
+      "cicero",
+      "mercury",
+      "hephaestus",
+      "astraea",
+      "vesta",
+      "calliope",
+      "plutus",
+      "clio",
+      "euclid",
+      "echo",
+      "homer",
+      "aphrodite",
+      "flora",
+      "lucius",
+      "numa",
+      "asclepius",
+      "eirene",
+      "concordia",
+      "fama",
+      "themis",
+      "hestia",
+      "orpheus",
+      "odysseus",
+      "ceres",
+      "pythia",
+      "herodotus",
+      "theseus",
+      "phidias",
+      "argus",
+      "minos",
+      "aurelius",
+      "penelope",
+      "harmonia",
+      "mnemosyne",
+      "persephone",
+      "sibyl",
+      "justitia",
+    ]);
+    const deprecated = new Set<string>(deprecatedHasnaCompanyAgentIdentifiers);
+    expect(inputs).toHaveLength(classicalSlugs.size);
     expect(hasnaCompanyAgentSpecs.some((spec) => spec.slug === "hermes" || spec.fullName.toLowerCase().includes("hermes"))).toBe(false);
 
     for (const input of inputs) {
-      expect(String(input.uniqueIdentifier)).not.toContain("hermes");
+      const identifier = String(input.uniqueIdentifier);
+      const slug = identifier.replace("agent:", "");
+      expect(classicalSlugs.has(slug)).toBe(true);
+      expect(deprecated.has(identifier)).toBe(false);
       const internalEmail = input.emails?.find((email) => typeof email !== "string" && email.label === "internal");
       expect(internalEmail).toBeDefined();
       if (typeof internalEmail !== "string") {
-        expect(internalEmail.address).toEndWith("@hasna.xyz");
+        expect(internalEmail.address).toBe(`${slug}@hasna.xyz`);
         expect(internalEmail.primary).toBe(true);
       }
       expect(input.documents?.prompt?.trim()).not.toBe("");
@@ -198,21 +246,28 @@ describe("open-identities", () => {
       uniqueIdentifier: "agent:hermes",
       emails: ["hermes@agents.hasna.local"],
     });
+    await store.create({
+      kind: "agent",
+      fullName: "Email Marketing Manager Agent",
+      uniqueIdentifier: "agent:email-marketing",
+      emails: ["email-marketing@hasna.xyz"],
+    });
 
     const seedOutput = await captureStdout(async () => {
       await runCli(["--json", "--store", storePath, "agent", "seed-company", "--docs-dir", docsDir]);
     });
     const seeded = JSON.parse(seedOutput);
-    expect(seeded.deleted).toEqual(["agent:hermes"]);
+    expect(seeded.deleted).toEqual(["agent:hermes", "agent:email-marketing"]);
     expect(seeded.documents.length).toBeGreaterThan(100);
 
     const updatedStore = new IdentityStore({ filePath: storePath, auditPath: join(dir, "audit.jsonl") });
     await expect(updatedStore.require("agent:hermes")).rejects.toThrow(/not found/);
-    const emailMarketing = await updatedStore.require("agent:email-marketing");
-    expect(emailMarketing.emails[0]).toMatchObject({ address: "email-marketing@hasna.xyz", label: "internal", primary: true });
-    expect(emailMarketing.emails.some((email) => email.address === "marketing@hasna.com" && email.label === "public")).toBe(true);
-    expect(await readFile(join(docsDir, "email-marketing", "PROMPT.md"), "utf8")).toContain("email-marketing@hasna.xyz");
-    expect(await readFile(join(docsDir, "email-marketing", "IDENTITY.md"), "utf8")).toContain("marketing@hasna.com");
+    await expect(updatedStore.require("agent:email-marketing")).rejects.toThrow(/not found/);
+    const calliope = await updatedStore.require("agent:calliope");
+    expect(calliope.emails[0]).toMatchObject({ address: "calliope@hasna.xyz", label: "internal", primary: true });
+    expect(calliope.emails.some((email) => email.address === "marketing@hasna.com" && email.label === "public")).toBe(true);
+    expect(await readFile(join(docsDir, "calliope", "PROMPT.md"), "utf8")).toContain("calliope@hasna.xyz");
+    expect(await readFile(join(docsDir, "calliope", "IDENTITY.md"), "utf8")).toContain("marketing@hasna.com");
   });
 });
 

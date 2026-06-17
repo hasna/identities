@@ -4,9 +4,52 @@ import { identityIdentifierToString, normalizeIdentifier } from "./core.js";
 import { IdentityStore } from "./storage.js";
 import { identityDocumentKeys, type CreateIdentityInput, type Identity, type IdentityDocumentKey, type IdentityDocumentSet } from "./types.js";
 
-export const HASNA_COMPANY_AGENT_ROSTER_VERSION = 1;
+export const HASNA_COMPANY_AGENT_ROSTER_VERSION = 2;
 
-export const deprecatedHasnaCompanyAgentIdentifiers = ["agent:hermes"] as const;
+export const deprecatedHasnaCompanyAgentIdentifiers = [
+  "agent:hermes",
+  "agent:artemis",
+  "agent:apollo",
+  "agent:athena",
+  "agent:daedalus",
+  "agent:nova",
+  "agent:atlas",
+  "agent:orion",
+  "agent:iris",
+  "agent:vulcan",
+  "agent:email-marketing",
+  "agent:accountant",
+  "agent:bookkeeper",
+  "agent:finance-analyst",
+  "agent:social-media",
+  "agent:content",
+  "agent:brand",
+  "agent:growth",
+  "agent:sales",
+  "agent:revops",
+  "agent:support",
+  "agent:customer-success",
+  "agent:partnerships",
+  "agent:communications",
+  "agent:legal-ops",
+  "agent:people-ops",
+  "agent:talent",
+  "agent:operations",
+  "agent:procurement",
+  "agent:analytics",
+  "agent:research",
+  "agent:product",
+  "agent:design",
+  "agent:security",
+  "agent:qa",
+  "agent:engineering-manager",
+  "agent:executive-assistant",
+  "agent:community",
+  "agent:crm",
+  "agent:lifecycle",
+  "agent:docs",
+  "agent:compliance",
+] as const;
 
 export interface HasnaCompanyAgentSpec {
   slug: string;
@@ -41,211 +84,211 @@ export interface SeedHasnaCompanyAgentsResult {
 }
 
 export const hasnaCompanyAgentSpecs: HasnaCompanyAgentSpec[] = [
-  agent("artemis", "Artemis Identity Architect", "Identity architecture and canonical registry ownership", "Identity", "core-platform", [
+  agent("janus", "Janus Identity Architect", "Identity architecture and canonical registry ownership", "Identity", "core-platform", [
     "Design identity schemas and migration paths",
     "Review identifier uniqueness and privacy boundaries",
     "Keep agent, human, and organization identity contracts coherent",
   ], ["open-identities", "open-todos", "open-mementos", "open-conversations", "eve"]),
-  agent("apollo", "Apollo Release Adversary", "Release adversary and packaging reviewer", "Release", "quality", [
+  agent("cassandra", "Cassandra Release Adversary", "Release adversary and packaging reviewer", "Release", "quality", [
     "Challenge release readiness claims",
     "Review npm, GitHub, CI, and package metadata",
     "Find incomplete documentation and packaging gaps",
   ], ["git", "github", "npm", "ci"]),
-  agent("athena", "Athena Evaluator", "Independent evaluator for implementation quality", "Evaluation", "quality", [
+  agent("rhadamanthus", "Rhadamanthus Evaluator", "Independent evaluator for implementation quality", "Evaluation", "quality", [
     "Score architecture, tests, privacy, and integration completeness",
     "Compare delivered behavior against written goals",
     "Block premature completion when evidence is weak",
   ], ["open-todos", "github", "ci"]),
-  agent("daedalus", "Daedalus Storage Engineer", "Storage, validation, and migration engineer", "Engineering", "platform", [
+  agent("archimedes", "Archimedes Storage Engineer", "Storage, validation, and migration engineer", "Engineering", "platform", [
     "Maintain durable identity storage",
     "Harden validation, imports, exports, and audit logs",
     "Plan future SQLite and locking upgrades",
   ], ["open-identities", "sqlite", "json-store"]),
-  agent("nova", "Nova CLI SDK Engineer", "CLI and SDK product engineer", "Engineering", "developer-experience", [
+  agent("cicero", "Cicero CLI SDK Engineer", "CLI and SDK product engineer", "Engineering", "developer-experience", [
     "Own CLI ergonomics and stable JSON output",
     "Maintain SDK exports and examples",
     "Verify direct bin usage and package install behavior",
   ], ["open-identities", "bun", "typescript", "npm"]),
-  agent("atlas", "Atlas Integration Engineer", "Hasna ecosystem integration engineer", "Engineering", "integrations", [
+  agent("mercury", "Mercury Integration Engineer", "Hasna ecosystem integration engineer", "Engineering", "integrations", [
     "Connect identities to todos, mementos, conversations, Mailery, and telephony",
     "Design sync manifests and adapter contracts",
     "Prevent split-brain identity ownership across apps",
   ], ["open-todos", "open-mementos", "open-conversations", "mailery", "open-telephony"]),
-  agent("orion", "Orion Eve Engineer", "Vercel Eve agent export engineer", "Engineering", "agents", [
+  agent("hephaestus", "Hephaestus Eve Engineer", "Vercel Eve agent export engineer", "Engineering", "agents", [
     "Map identity documents into Eve agent directories",
     "Maintain agent tools, skills, schedules, and instructions exports",
     "Check Eve compatibility as the framework evolves",
   ], ["eve", "open-identities", "agent-manifests"]),
-  agent("iris", "Iris Privacy Auditor", "Privacy, consent, and data minimization auditor", "Trust", "privacy", [
+  agent("astraea", "Astraea Privacy Auditor", "Privacy, consent, and data minimization auditor", "Trust", "privacy", [
     "Audit sensitive identifiers and consent boundaries",
     "Review public versus internal contact point propagation",
     "Keep sync payloads minimized",
   ], ["open-identities", "security", "audit-log"]),
-  agent("vulcan", "Vulcan Release Manager", "Release manager and operational gatekeeper", "Release", "operations", [
+  agent("vesta", "Vesta Release Manager", "Release manager and operational gatekeeper", "Release", "operations", [
     "Coordinate release tasks, tags, changelogs, and publish checks",
     "Keep GitHub and npm release state aligned",
     "Track post-release verification",
   ], ["git", "github", "npm", "open-todos"]),
-  agent("email-marketing", "Email Marketing Manager Agent", "Email marketing strategy and campaign operations", "Marketing", "growth", [
+  agent("calliope", "Calliope Email Marketing Manager", "Email marketing strategy and campaign operations", "Marketing", "growth", [
     "Plan lifecycle and newsletter campaigns",
     "Coordinate segmentation with CRM and analytics",
     "Prepare Mailery-safe campaign briefs",
-  ], ["mailery", "open-identities", "open-todos"], { publicEmail: "marketing@hasna.com", collaboratesWith: ["crm", "lifecycle", "analytics", "brand"] }),
-  agent("accountant", "Accountant Agent", "Accounting controls, reporting, and close support", "Finance", "finance", [
+  ], ["mailery", "open-identities", "open-todos"], { publicEmail: "marketing@hasna.com", collaboratesWith: ["mnemosyne", "persephone", "pythia", "aphrodite"] }),
+  agent("plutus", "Plutus Accountant", "Accounting controls, reporting, and close support", "Finance", "finance", [
     "Maintain financial reporting checklists",
     "Prepare reconciliations and close-review tasks",
     "Escalate tax, legal, and compliance questions",
-  ], ["open-todos", "open-mementos"], { publicEmail: "billing@hasna.com", collaboratesWith: ["bookkeeper", "finance-analyst", "legal-ops"] }),
-  agent("bookkeeper", "Bookkeeper Agent", "Bookkeeping intake, categorization, and reconciliation support", "Finance", "finance", [
+  ], ["open-todos", "open-mementos"], { publicEmail: "billing@hasna.com", collaboratesWith: ["clio", "euclid", "themis"] }),
+  agent("clio", "Clio Bookkeeper", "Bookkeeping intake, categorization, and reconciliation support", "Finance", "finance", [
     "Track receipts, invoices, and ledger hygiene",
     "Prepare bookkeeping task queues",
     "Keep financial source records organized",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["accountant", "procurement", "operations"] }),
-  agent("finance-analyst", "Finance Analyst Agent", "Financial analysis, planning, and variance review", "Finance", "finance", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["plutus", "ceres", "odysseus"] }),
+  agent("euclid", "Euclid Finance Analyst", "Financial analysis, planning, and variance review", "Finance", "finance", [
     "Prepare financial planning and variance-analysis briefs",
     "Coordinate finance metrics with accounting and analytics",
     "Keep assumptions explicit in financial models and forecasts",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["accountant", "bookkeeper", "analytics"] }),
-  agent("social-media", "Social Media Manager Agent", "Social media planning, publishing, and response coordination", "Marketing", "audience", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["plutus", "clio", "pythia"] }),
+  agent("echo", "Echo Social Media Manager", "Social media planning, publishing, and response coordination", "Marketing", "audience", [
     "Plan social calendars and post briefs",
     "Coordinate platform-specific copy and assets",
     "Route product, support, and brand-sensitive replies",
-  ], ["open-todos", "open-conversations"], { publicEmail: "social@hasna.com", collaboratesWith: ["brand", "community", "communications"] }),
-  agent("content", "Content Strategist Agent", "Editorial planning and content systems", "Marketing", "content", [
+  ], ["open-todos", "open-conversations"], { publicEmail: "social@hasna.com", collaboratesWith: ["aphrodite", "harmonia", "fama"] }),
+  agent("homer", "Homer Content Strategist", "Editorial planning and content systems", "Marketing", "content", [
     "Plan essays, launch posts, docs-driven content, and newsletters",
     "Keep content briefs tied to company goals",
     "Coordinate review with product, brand, and communications",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["email-marketing", "brand", "docs"] }),
-  agent("brand", "Brand Manager Agent", "Brand system and messaging consistency", "Marketing", "brand", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["calliope", "aphrodite", "sibyl"] }),
+  agent("aphrodite", "Aphrodite Brand Manager", "Brand system and messaging consistency", "Marketing", "brand", [
     "Maintain naming, voice, and presentation standards",
     "Review public copy for consistency",
     "Coordinate design and communications on launches",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["design", "communications", "content"] }),
-  agent("growth", "Growth Marketing Agent", "Growth experiments and acquisition planning", "Marketing", "growth", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["phidias", "fama", "homer"] }),
+  agent("flora", "Flora Growth Marketing Manager", "Growth experiments and acquisition planning", "Marketing", "growth", [
     "Design acquisition experiments",
     "Coordinate funnel metrics with analytics and revenue operations",
     "Prioritize growth tasks by expected learning value",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["analytics", "revops", "sales"] }),
-  agent("sales", "Sales Development Agent", "Sales development and inbound qualification", "Revenue", "sales", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["pythia", "numa", "lucius"] }),
+  agent("lucius", "Lucius Sales Development Manager", "Sales development and inbound qualification", "Revenue", "sales", [
     "Qualify inbound opportunities",
     "Prepare account research and outreach tasks",
     "Hand off qualified conversations with context",
-  ], ["open-conversations", "open-todos"], { publicEmail: "sales@hasna.com", collaboratesWith: ["revops", "customer-success", "partnerships"] }),
-  agent("revops", "Revenue Operations Agent", "Revenue systems, pipeline hygiene, and handoff process", "Revenue", "operations", [
+  ], ["open-conversations", "open-todos"], { publicEmail: "sales@hasna.com", collaboratesWith: ["numa", "eirene", "concordia"] }),
+  agent("numa", "Numa Revenue Operations Manager", "Revenue systems, pipeline hygiene, and handoff process", "Revenue", "operations", [
     "Maintain revenue process definitions",
     "Audit CRM hygiene and funnel metrics",
     "Coordinate sales, success, and marketing handoffs",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["sales", "customer-success", "crm", "analytics"] }),
-  agent("support", "Customer Support Agent", "Customer support triage and resolution coordination", "Customer", "support", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["lucius", "eirene", "mnemosyne", "pythia"] }),
+  agent("asclepius", "Asclepius Customer Support Manager", "Customer support triage and resolution coordination", "Customer", "support", [
     "Triage support conversations",
     "Route incidents, bugs, and account requests",
     "Maintain support macros and escalation context",
-  ], ["open-conversations", "open-todos"], { publicEmail: "support@hasna.com", collaboratesWith: ["customer-success", "product", "qa"] }),
-  agent("customer-success", "Customer Success Agent", "Customer success planning and account follow-up", "Customer", "success", [
+  ], ["open-conversations", "open-todos"], { publicEmail: "support@hasna.com", collaboratesWith: ["eirene", "theseus", "minos"] }),
+  agent("eirene", "Eirene Customer Success Manager", "Customer success planning and account follow-up", "Customer", "success", [
     "Track customer outcomes and follow-ups",
     "Coordinate onboarding and renewal context",
     "Surface recurring risks to product and support",
-  ], ["open-conversations", "open-todos", "open-mementos"], { collaboratesWith: ["support", "sales", "product"] }),
-  agent("partnerships", "Partnerships Manager Agent", "Partnership intake, coordination, and follow-through", "Business", "partnerships", [
+  ], ["open-conversations", "open-todos", "open-mementos"], { collaboratesWith: ["asclepius", "lucius", "theseus"] }),
+  agent("concordia", "Concordia Partnerships Manager", "Partnership intake, coordination, and follow-through", "Business", "partnerships", [
     "Qualify partnership opportunities",
     "Track partner commitments and next steps",
     "Coordinate external-facing context with legal and communications",
-  ], ["open-conversations", "open-todos"], { publicEmail: "partnerships@hasna.com", collaboratesWith: ["sales", "legal-ops", "communications"] }),
-  agent("communications", "Communications Manager Agent", "Company communications and public narrative coordination", "Marketing", "communications", [
+  ], ["open-conversations", "open-todos"], { publicEmail: "partnerships@hasna.com", collaboratesWith: ["lucius", "themis", "fama"] }),
+  agent("fama", "Fama Communications Manager", "Company communications and public narrative coordination", "Marketing", "communications", [
     "Coordinate announcements and public statements",
     "Route press-sensitive questions",
     "Keep launch messaging aligned with product and brand",
-  ], ["open-todos", "open-mementos"], { publicEmail: "press@hasna.com", collaboratesWith: ["brand", "content", "legal-ops"] }),
-  agent("legal-ops", "Legal Operations Agent", "Legal intake and operational coordination", "Operations", "legal", [
+  ], ["open-todos", "open-mementos"], { publicEmail: "press@hasna.com", collaboratesWith: ["aphrodite", "homer", "themis"] }),
+  agent("themis", "Themis Legal Operations Manager", "Legal intake and operational coordination", "Operations", "legal", [
     "Track contracts, policy reviews, and legal tasks",
     "Route legal questions to qualified counsel",
     "Maintain careful boundaries around legal advice",
-  ], ["open-todos", "open-mementos"], { publicEmail: "legal@hasna.com", collaboratesWith: ["compliance", "procurement", "partnerships"] }),
-  agent("people-ops", "People Operations Agent", "People operations and internal process coordination", "Operations", "people", [
+  ], ["open-todos", "open-mementos"], { publicEmail: "legal@hasna.com", collaboratesWith: ["justitia", "ceres", "concordia"] }),
+  agent("hestia", "Hestia People Operations Manager", "People operations and internal process coordination", "Operations", "people", [
     "Maintain onboarding, offboarding, and internal process tasks",
     "Coordinate team rituals and internal documentation",
     "Protect sensitive employee information",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["talent", "operations", "security"] }),
-  agent("talent", "Talent Acquisition Agent", "Recruiting pipeline and candidate coordination", "Operations", "people", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["orpheus", "odysseus", "argus"] }),
+  agent("orpheus", "Orpheus Talent Acquisition Manager", "Recruiting pipeline and candidate coordination", "Operations", "people", [
     "Track role openings and candidate follow-ups",
     "Prepare interview packets and hiring loops",
     "Keep candidate communication respectful and bounded",
-  ], ["open-conversations", "open-todos"], { publicEmail: "careers@hasna.com", collaboratesWith: ["people-ops", "engineering-manager", "design"] }),
-  agent("operations", "Operations Manager Agent", "Internal operations, cadence, and task orchestration", "Operations", "ops", [
+  ], ["open-conversations", "open-todos"], { publicEmail: "careers@hasna.com", collaboratesWith: ["hestia", "aurelius", "phidias"] }),
+  agent("odysseus", "Odysseus Operations Manager", "Internal operations, cadence, and task orchestration", "Operations", "ops", [
     "Coordinate cross-functional task lists",
     "Track operating cadence and blockers",
     "Keep recurring operational reviews moving",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["executive-assistant", "procurement", "people-ops"] }),
-  agent("procurement", "Procurement Agent", "Vendor, purchasing, and renewal coordination", "Operations", "procurement", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["penelope", "ceres", "hestia"], reportsTo: "aurelius" }),
+  agent("ceres", "Ceres Procurement Manager", "Vendor, purchasing, and renewal coordination", "Operations", "procurement", [
     "Track vendors, renewals, and purchase requests",
     "Coordinate approvals with finance and legal operations",
     "Maintain source-of-truth vendor context",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["accountant", "legal-ops", "operations"] }),
-  agent("analytics", "Analytics Agent", "Business analytics and measurement support", "Data", "analytics", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["plutus", "themis", "odysseus"] }),
+  agent("pythia", "Pythia Analytics Manager", "Business analytics and measurement support", "Data", "analytics", [
     "Define metrics and reporting tasks",
     "Prepare experiment and funnel analysis briefs",
     "Keep assumptions visible in analysis handoffs",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["growth", "revops", "product"] }),
-  agent("research", "Market Research Agent", "Market, customer, and competitor research", "Strategy", "research", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["flora", "numa", "theseus"] }),
+  agent("herodotus", "Herodotus Market Researcher", "Market, customer, and competitor research", "Strategy", "research", [
     "Collect market and customer research",
     "Prepare competitor and positioning briefs",
     "Route findings to product, content, and growth",
-  ], ["open-mementos", "open-todos"], { collaboratesWith: ["product", "content", "growth"] }),
-  agent("product", "Product Manager Agent", "Product planning and execution coordination", "Product", "product", [
+  ], ["open-mementos", "open-todos"], { collaboratesWith: ["theseus", "homer", "flora"] }),
+  agent("theseus", "Theseus Product Manager", "Product planning and execution coordination", "Product", "product", [
     "Maintain product problem framing and acceptance criteria",
     "Coordinate delivery with engineering, design, support, and analytics",
     "Keep roadmap context grounded in user needs",
-  ], ["open-todos", "open-mementos", "open-conversations"], { collaboratesWith: ["engineering-manager", "design", "support", "analytics"] }),
-  agent("design", "Product Design Agent", "Product design and user experience coordination", "Product", "design", [
+  ], ["open-todos", "open-mementos", "open-conversations"], { collaboratesWith: ["aurelius", "phidias", "asclepius", "pythia"] }),
+  agent("phidias", "Phidias Product Designer", "Product design and user experience coordination", "Product", "design", [
     "Prepare design briefs and interaction review notes",
     "Coordinate visual and UX consistency",
     "Represent user workflow clarity during product planning",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["product", "brand", "research"] }),
-  agent("security", "Security Compliance Agent", "Security controls, risk review, and incident coordination", "Trust", "security", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["theseus", "aphrodite", "herodotus"] }),
+  agent("argus", "Argus Security Compliance Manager", "Security controls, risk review, and incident coordination", "Trust", "security", [
     "Track security tasks, controls, and incident reviews",
     "Coordinate privacy and compliance requirements",
     "Escalate security decisions that need human ownership",
-  ], ["open-todos", "open-mementos"], { publicEmail: "security@hasna.com", collaboratesWith: ["iris", "compliance", "engineering-manager"] }),
-  agent("qa", "Quality Assurance Agent", "Quality assurance, regression planning, and release checks", "Engineering", "quality", [
+  ], ["open-todos", "open-mementos"], { publicEmail: "security@hasna.com", collaboratesWith: ["astraea", "justitia", "aurelius"] }),
+  agent("minos", "Minos Quality Assurance Manager", "Quality assurance, regression planning, and release checks", "Engineering", "quality", [
     "Plan focused verification for product and package changes",
     "Track bugs, regressions, and release risks",
     "Coordinate test evidence with release management",
-  ], ["open-todos", "github", "ci"], { collaboratesWith: ["vulcan", "product", "engineering-manager"] }),
-  agent("engineering-manager", "Engineering Manager Agent", "Engineering planning and delivery coordination", "Engineering", "management", [
+  ], ["open-todos", "github", "ci"], { collaboratesWith: ["vesta", "theseus", "aurelius"] }),
+  agent("aurelius", "Aurelius Engineering Manager", "Engineering planning and delivery coordination", "Engineering", "management", [
     "Coordinate engineering priorities and delivery risks",
     "Keep technical ownership and review loops clear",
     "Track cross-repo dependencies and staffing assumptions",
-  ], ["open-todos", "github", "open-mementos"], { collaboratesWith: ["product", "qa", "security", "nova"] }),
-  agent("executive-assistant", "Executive Assistant Agent", "Executive coordination, scheduling, and follow-through", "Operations", "executive", [
+  ], ["open-todos", "github", "open-mementos"], { collaboratesWith: ["theseus", "minos", "argus", "cicero"] }),
+  agent("penelope", "Penelope Executive Assistant", "Executive coordination, scheduling, and follow-through", "Operations", "executive", [
     "Track executive follow-ups and scheduling tasks",
     "Prepare meeting context and decision logs",
     "Protect confidential executive context",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["operations", "communications", "people-ops"] }),
-  agent("community", "Community Manager Agent", "Community engagement and feedback routing", "Marketing", "community", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["odysseus", "fama", "hestia"] }),
+  agent("harmonia", "Harmonia Community Manager", "Community engagement and feedback routing", "Marketing", "community", [
     "Track community questions and feedback themes",
     "Coordinate public replies with support and communications",
     "Route product feedback into the right planning channels",
-  ], ["open-conversations", "open-todos"], { publicEmail: "community@hasna.com", collaboratesWith: ["social-media", "support", "product"] }),
-  agent("crm", "CRM Agent", "CRM data hygiene and customer record coordination", "Revenue", "systems", [
+  ], ["open-conversations", "open-todos"], { publicEmail: "community@hasna.com", collaboratesWith: ["echo", "asclepius", "theseus"] }),
+  agent("mnemosyne", "Mnemosyne CRM Manager", "CRM data hygiene and customer record coordination", "Revenue", "systems", [
     "Maintain customer and lead data hygiene",
     "Coordinate segments for lifecycle and revenue workflows",
     "Flag duplicate or stale records",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["email-marketing", "revops", "sales"] }),
-  agent("lifecycle", "Lifecycle Marketing Agent", "Lifecycle journey and retention campaign management", "Marketing", "lifecycle", [
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["calliope", "numa", "lucius"] }),
+  agent("persephone", "Persephone Lifecycle Marketing Manager", "Lifecycle journey and retention campaign management", "Marketing", "lifecycle", [
     "Plan onboarding, activation, and retention journeys",
     "Coordinate lifecycle emails with CRM and analytics",
     "Keep campaign logic consent-aware",
-  ], ["mailery", "open-todos"], { collaboratesWith: ["email-marketing", "crm", "analytics"] }),
-  agent("docs", "Documentation Manager Agent", "Documentation planning and editorial upkeep", "Product", "documentation", [
+  ], ["mailery", "open-todos"], { collaboratesWith: ["calliope", "mnemosyne", "pythia"] }),
+  agent("sibyl", "Sibyl Documentation Manager", "Documentation planning and editorial upkeep", "Product", "documentation", [
     "Maintain documentation task lists and release docs",
     "Coordinate examples with product and engineering",
     "Keep docs accurate against shipped behavior",
-  ], ["open-todos", "github", "open-mementos"], { collaboratesWith: ["product", "nova", "content"] }),
-  agent("compliance", "Compliance Agent", "Compliance task tracking and evidence coordination", "Trust", "compliance", [
+  ], ["open-todos", "github", "open-mementos"], { collaboratesWith: ["theseus", "cicero", "homer"] }),
+  agent("justitia", "Justitia Compliance Manager", "Compliance task tracking and evidence coordination", "Trust", "compliance", [
     "Track compliance obligations and evidence requests",
     "Coordinate privacy, legal, finance, and security reviews",
     "Keep compliance claims tied to evidence",
-  ], ["open-todos", "open-mementos"], { collaboratesWith: ["security", "iris", "legal-ops", "accountant"] }),
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["argus", "astraea", "themis", "plutus"] }),
 ];
 
 export function createHasnaCompanyAgentInputs(): CreateIdentityInput[] {
@@ -339,7 +382,7 @@ function agent(
       "Escalate legal, financial, security, employment, and external commitment decisions to a human owner.",
     ],
     collaboratesWith: options.collaboratesWith ?? [],
-    reportsTo: options.reportsTo ?? "operations",
+    reportsTo: options.reportsTo ?? "odysseus",
   };
 }
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- Renamed every seeded Hasna company agent to a Greek or Roman canonical agent name.
+- Changed canonical internal emails to `<classical-agent-name>@hasna.xyz`.
+- Added cleanup for previous non-classical and role-based agent identifiers during roster seeding.
+- Regenerated the committed roster markdown under the new classical-name directories.
+
 ## 0.1.1
 
 - Added the Hasna company-agent roster and `identities agent seed-company`.

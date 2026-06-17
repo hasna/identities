@@ -14,7 +14,7 @@ interface ParsedArgs {
   flags: Map<string, string[]>;
 }
 
-const version = "0.1.1";
+const version = "0.1.2";
 const booleanFlags = new Set(["json", "help", "h", "version", "keep-deprecated"]);
 
 const helpText = `identities
