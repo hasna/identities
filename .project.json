@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "wks_f8d6g4uyrfrn",
+  "slug": "open-identities",
+  "name": "open-identities",
+  "kind": "open-source",
+  "root_id": null,
+  "recipe_id": null,
+  "primary_path": "/home/hasna/workspace/hasna/opensource/open-identities",
+  "git_remote": "https://github.com/hasna/identities.git",
+  "tags": [
+    "open-source",
+    "identity",
+    "ai",
+    "agent",
+    "human"
+  ],
+  "integrations": {},
+  "generated_at": "2026-06-17T10:59:56.656Z"
+}

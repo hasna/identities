@@ -1,0 +1,88 @@
+{
+  "name": "@hasna/identities",
+  "version": "0.1.0",
+  "description": "Open identity records for humans and AI agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "identities": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./storage": {
+      "types": "./dist/storage.d.ts",
+      "import": "./dist/storage.js"
+    },
+    "./integrations": {
+      "types": "./dist/integrations.d.ts",
+      "import": "./dist/integrations.js"
+    },
+    "./ecosystem": {
+      "types": "./dist/ecosystem.d.ts",
+      "import": "./dist/ecosystem.js"
+    },
+    "./eve": {
+      "types": "./dist/eve.d.ts",
+      "import": "./dist/eve.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "PROMPT.md",
+    "SOUL.md",
+    "PERSONALITY.md",
+    "ETHOS.md",
+    "docs"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "bun run clean && bun build src/index.ts src/storage.ts src/integrations.ts src/ecosystem.ts src/eve.ts src/cli.ts --outdir dist --target bun && tsc --emitDeclarationOnly --outDir dist",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "verify:release": "bun run typecheck && bun test && bun run build && npm pack --dry-run --ignore-scripts",
+    "dev:cli": "bun run src/cli.ts",
+    "prepublishOnly": "bun run verify:release",
+    "postinstall": "mkdir -p $HOME/.hasna/identities 2>/dev/null || true"
+  },
+  "keywords": [
+    "identity",
+    "identities",
+    "ai",
+    "agents",
+    "humans",
+    "mailery",
+    "telephony",
+    "mcp",
+    "cli"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hasna/identities.git"
+  },
+  "homepage": "https://github.com/hasna/identities",
+  "bugs": {
+    "url": "https://github.com/hasna/identities/issues"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "author": "Andrei Hasna <andrei@hasna.com>",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/bun": "^1.2.4",
+    "@types/node": "^22.13.4",
+    "typescript": "^5.7.3"
+  }
+}
