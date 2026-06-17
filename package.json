@@ -32,6 +32,10 @@
     "./roster": {
       "types": "./dist/roster.d.ts",
       "import": "./dist/roster.js"
+    },
+    "./status": {
+      "types": "./dist/status.d.ts",
+      "import": "./dist/status.js"
     }
   },
   "files": [
@@ -49,7 +53,7 @@
   ],
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "bun run clean && bun build src/index.ts src/storage.ts src/integrations.ts src/ecosystem.ts src/eve.ts src/roster.ts src/cli.ts --outdir dist --target bun && tsc --emitDeclarationOnly --outDir dist",
+    "build": "bun run clean && bun build src/index.ts src/storage.ts src/integrations.ts src/ecosystem.ts src/eve.ts src/roster.ts src/status.ts src/cli.ts --outdir dist --target bun && tsc --emitDeclarationOnly --outDir dist",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "verify:release": "bun run typecheck && bun test && bun run build && npm pack --dry-run --ignore-scripts",

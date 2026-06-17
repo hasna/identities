@@ -26,10 +26,18 @@ identities agent manifest agent:ava-example --json
 identities agent seed-company --docs-dir agents/hasna --json
 identities eve export agent:ava-example --out ./ava-agent
 identities validate --json
+identities status --json
 ```
 
 Data is stored in `~/.hasna/identities/identities.json`.
 Use `OPEN_IDENTITIES_STORE=/path/to/identities.json` or `--store <path>` for isolated scripts and tests.
+
+`identities status --json` emits a metadata-only reference contract for fleet
+consumers. It reports package version, redacted store paths, env override
+names, roster and role counts, aggregate contact/document counts, and opaque
+identity refs. It does not include names, email addresses, phone numbers,
+identifier values, document bodies, credentials, private keys, GitHub App
+private data, or raw env values.
 
 ## Hasna Company Agent Roster
 
@@ -44,7 +52,7 @@ The seed command upserts the roster into the selected identity store, prunes dep
 ## SDK
 
 ```ts
-import { IdentityStore, syncIdentityContactPointsAndUpdate } from "@hasna/identities";
+import { IdentityStore, getIdentityReferenceStatus, syncIdentityContactPointsAndUpdate } from "@hasna/identities";
 
 const store = new IdentityStore();
 const identity = await store.create({
@@ -74,6 +82,9 @@ await syncIdentityContactPointsAndUpdate(store, identity.id, {
     },
   },
 });
+
+const status = await getIdentityReferenceStatus(store);
+console.log(status.counts.roster.builtInAgents);
 ```
 
 ## Identity Shape

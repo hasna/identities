@@ -8,6 +8,7 @@ import { identityToAgentManifest } from "./core.js";
 import { syncIdentityContactPointsAndUpdate } from "./integrations.js";
 import { writeEveAgent } from "./eve.js";
 import { seedHasnaCompanyAgents } from "./roster.js";
+import { getIdentityReferenceStatus } from "./status.js";
 
 interface ParsedArgs {
   positionals: string[];
@@ -40,6 +41,7 @@ Commands:
   eve export <id|identifier> --out <dir>
   sync <id|identifier>
   validate
+  status
   export [path]
   import <path>
   version
@@ -75,6 +77,11 @@ async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean)
 
   if (command === "version" || hasFlag(parsed, "version")) {
     output({ version }, json);
+    return;
+  }
+
+  if (command === "status") {
+    output(await getIdentityReferenceStatus(store), json);
     return;
   }
 
