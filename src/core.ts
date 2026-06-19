@@ -5,11 +5,15 @@ import type {
   CreateIdentityInput,
   EmailAddress,
   Identity,
+  IdentityAsset,
+  IdentityAssetInput,
   IdentityContactCard,
   IdentityDocumentSet,
   IdentityIdentifier,
   PhoneNumber,
+  ProfileImage,
   UpdateIdentityInput,
+  VoiceProfile,
 } from "./types.js";
 import { identityDocumentKeys } from "./types.js";
 
@@ -112,6 +116,9 @@ export function createIdentity(input: CreateIdentityInput): Identity {
     emails,
     phones,
     documents: { ...createDefaultDocuments(), ...(input.documents ?? {}) },
+    voice: input.voice ? normalizeVoiceProfile(input.voice) : undefined,
+    profileImage: input.profileImage ? normalizeProfileImage(input.profileImage) : undefined,
+    assets: normalizeIdentityAssets(input.assets),
     agent: input.kind === "agent" ? normalizeAgentProfile(input.agent) : input.agent ? normalizeAgentProfile(input.agent) : undefined,
     traits: input.traits ?? {},
     metadata: input.metadata ?? {},
@@ -136,10 +143,44 @@ export function updateIdentity(identity: Identity, input: UpdateIdentityInput): 
     emails: input.emails ? ensureSinglePrimary(input.emails.map(normalizeEmail)) : identity.emails,
     phones: input.phones ? ensureSinglePrimary(input.phones.map(normalizePhone)) : identity.phones,
     documents: input.documents ? { ...identity.documents, ...input.documents } : identity.documents,
+    voice:
+      input.voice === null ? undefined : input.voice ? normalizeVoiceProfile(input.voice, identity.voice) : identity.voice,
+    profileImage:
+      input.profileImage === null
+        ? undefined
+        : input.profileImage
+          ? normalizeProfileImage(input.profileImage, identity.profileImage)
+          : identity.profileImage,
+    assets: input.assets ? normalizeIdentityAssets(input.assets) : normalizeIdentityAssets(identity.assets ?? []),
     agent: input.agent ? normalizeAgentProfile(input.agent, identity.agent) : identity.agent,
     traits: input.traits ? { ...identity.traits, ...input.traits } : identity.traits,
     metadata: input.metadata ? { ...identity.metadata, ...input.metadata } : identity.metadata,
     updatedAt: nowIso(),
+  };
+}
+
+export function normalizePersistedIdentity(identity: Identity): Identity {
+  const timestamp = identity.createdAt ?? nowIso();
+  const uniqueIdentifier = normalizeIdentifier(identity.uniqueIdentifier);
+  return {
+    ...identity,
+    id: identity.id,
+    kind: identity.kind,
+    fullName: requiredTrimmed(identity.fullName, "fullName"),
+    displayName: identity.displayName?.trim(),
+    uniqueIdentifier,
+    identifiers: dedupeIdentifiers([uniqueIdentifier, ...(identity.identifiers ?? []).map(normalizeIdentifier)]),
+    emails: ensureSinglePrimary((identity.emails ?? []).map(normalizeEmail)),
+    phones: ensureSinglePrimary((identity.phones ?? []).map(normalizePhone)),
+    documents: { ...createDefaultDocuments(), ...(identity.documents ?? {}) },
+    voice: identity.voice ? normalizeVoiceProfile(identity.voice) : undefined,
+    profileImage: identity.profileImage ? normalizeProfileImage(identity.profileImage) : undefined,
+    assets: normalizeIdentityAssets(identity.assets ?? []),
+    agent: identity.agent ? normalizeAgentProfile(identity.agent) : undefined,
+    traits: identity.traits ?? {},
+    metadata: identity.metadata ?? {},
+    createdAt: timestamp,
+    updatedAt: identity.updatedAt ?? timestamp,
   };
 }
 
@@ -205,12 +246,58 @@ export function identityToAgentManifest(identity: Identity): AgentRegistrationMa
     channels: identity.agent?.channels ?? [],
     schedules: identity.agent?.schedules ?? [],
     subagents: identity.agent?.subagents ?? [],
-    documents: identity.documents,
+    documents: createDefaultDocuments(),
+    voice: projectVoiceProfile(identity.voice),
+    profileImage: projectProfileImage(identity.profileImage),
+    assets: (identity.assets ?? []).map(projectIdentityAsset),
     metadata: {
-      ...identity.metadata,
       openIdentitiesId: identity.id,
       uniqueIdentifier: identityIdentifierToString(publicIdentityIdentifier(identity)),
     },
+  };
+}
+
+export function projectIdentityAsset(asset: IdentityAsset): IdentityAsset {
+  return {
+    id: asset.id,
+    kind: asset.kind,
+    provider: asset.provider,
+    status: asset.status,
+    source: asset.source,
+    mediaType: asset.mediaType,
+    bytes: asset.bytes,
+    checksum: asset.checksum,
+    model: asset.model,
+    generatedAt: asset.generatedAt,
+    error: asset.error,
+  };
+}
+
+export function projectVoiceProfile(voice: VoiceProfile | undefined): VoiceProfile | undefined {
+  if (!voice) return undefined;
+  return {
+    provider: voice.provider,
+    voiceId: voice.voiceId,
+    generatedVoiceId: voice.generatedVoiceId,
+    name: voice.name,
+    model: voice.model,
+    outputFormat: voice.outputFormat,
+    assetId: voice.assetId,
+    previewAssetId: voice.previewAssetId,
+    createdAt: voice.createdAt,
+    updatedAt: voice.updatedAt,
+  };
+}
+
+export function projectProfileImage(profileImage: ProfileImage | undefined): ProfileImage | undefined {
+  if (!profileImage) return undefined;
+  return {
+    provider: profileImage.provider,
+    model: profileImage.model,
+    aspectRatio: profileImage.aspectRatio,
+    assetId: profileImage.assetId,
+    createdAt: profileImage.createdAt,
+    updatedAt: profileImage.updatedAt,
   };
 }
 
@@ -228,8 +315,89 @@ export function renderIdentityInstructions(identity: Identity): string {
   appendDocumentSection(lines, "Goals", identity.documents.goals);
   appendDocumentSection(lines, "Context", identity.documents.context);
   appendDocumentSection(lines, "Consent", identity.documents.consent);
+  appendDocumentSection(lines, "Voice", identity.documents.voice);
+
+  if (identity.voice) {
+    lines.push("", "## Voice Profile", "");
+    lines.push(`Provider: ${identity.voice.provider}`);
+    if (identity.voice.voiceId) lines.push(`Voice ID: ${identity.voice.voiceId}`);
+    if (identity.voice.generatedVoiceId) lines.push(`Generated Voice ID: ${identity.voice.generatedVoiceId}`);
+    if (identity.voice.model) lines.push(`Model: ${identity.voice.model}`);
+    if (identity.voice.assetId) lines.push(`Current Asset: ${identity.voice.assetId}`);
+  }
+
+  if (identity.profileImage) {
+    lines.push("", "## Profile Image", "");
+    lines.push(`Provider: ${identity.profileImage.provider}`);
+    if (identity.profileImage.model) lines.push(`Model: ${identity.profileImage.model}`);
+    if (identity.profileImage.aspectRatio) lines.push(`Aspect Ratio: ${identity.profileImage.aspectRatio}`);
+    if (identity.profileImage.assetId) lines.push(`Current Asset: ${identity.profileImage.assetId}`);
+  }
 
   return `${lines.join("\n").trim()}\n`;
+}
+
+export function normalizeIdentityAsset(asset: IdentityAssetInput): IdentityAsset {
+  return {
+    source: "generated",
+    metadata: {},
+    ...asset,
+    id: asset.id?.trim() || `asset_${randomUUID()}`,
+    kind: requireAssetKind(asset.kind),
+    provider: requiredTrimmed(asset.provider, "asset provider"),
+    status: asset.status ?? "generated",
+    generatedAt: asset.generatedAt,
+    prompt: asset.prompt?.trim(),
+    model: asset.model?.trim(),
+  };
+}
+
+export function normalizeIdentityAssets(assets: IdentityAssetInput[] | undefined): IdentityAsset[] {
+  const seen = new Set<string>();
+  const normalized: IdentityAsset[] = [];
+  for (const asset of assets ?? []) {
+    const next = normalizeIdentityAsset(asset);
+    if (seen.has(next.id)) continue;
+    seen.add(next.id);
+    normalized.push(next);
+  }
+  return normalized;
+}
+
+export function normalizeVoiceProfile(input: Partial<VoiceProfile>, existing?: VoiceProfile): VoiceProfile {
+  const provider = input.provider ?? existing?.provider;
+  if (!provider) throw new Error("voice provider cannot be empty");
+  return {
+    ...existing,
+    ...input,
+    provider: requiredTrimmed(provider, "voice provider"),
+    voiceId: trimmedOptional(input.voiceId ?? existing?.voiceId),
+    generatedVoiceId: trimmedOptional(input.generatedVoiceId ?? existing?.generatedVoiceId),
+    name: trimmedOptional(input.name ?? existing?.name),
+    description: trimmedOptional(input.description ?? existing?.description),
+    model: trimmedOptional(input.model ?? existing?.model),
+    outputFormat: trimmedOptional(input.outputFormat ?? existing?.outputFormat),
+    sampleText: trimmedOptional(input.sampleText ?? existing?.sampleText),
+    assetId: trimmedOptional(input.assetId ?? existing?.assetId),
+    previewAssetId: trimmedOptional(input.previewAssetId ?? existing?.previewAssetId),
+    metadata: { ...(existing?.metadata ?? {}), ...(input.metadata ?? {}) },
+  };
+}
+
+export function normalizeProfileImage(input: Partial<ProfileImage>, existing?: ProfileImage): ProfileImage {
+  const provider = input.provider ?? existing?.provider;
+  if (!provider) throw new Error("profile image provider cannot be empty");
+  return {
+    ...existing,
+    ...input,
+    provider: requiredTrimmed(provider, "profile image provider"),
+    model: trimmedOptional(input.model ?? existing?.model),
+    prompt: trimmedOptional(input.prompt ?? existing?.prompt),
+    aspectRatio: trimmedOptional(input.aspectRatio ?? existing?.aspectRatio),
+    assetId: trimmedOptional(input.assetId ?? existing?.assetId),
+    url: trimmedOptional(input.url ?? existing?.url),
+    metadata: { ...(existing?.metadata ?? {}), ...(input.metadata ?? {}) },
+  };
 }
 
 function normalizeAgentProfile(input: Partial<AgentProfile> | undefined, existing?: AgentProfile): AgentProfile {
@@ -248,6 +416,11 @@ function normalizeAgentProfile(input: Partial<AgentProfile> | undefined, existin
 
 function normalizeStringList(values: string[] | undefined): string[] {
   return [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))];
+}
+
+function requireAssetKind(kind: string): IdentityAsset["kind"] {
+  if (kind === "voice" || kind === "profile-image") return kind;
+  throw new Error(`Invalid asset kind: ${kind}`);
 }
 
 function dedupeIdentifiers(identifiers: IdentityIdentifier[]): IdentityIdentifier[] {
@@ -285,6 +458,11 @@ function requiredTrimmed(value: string, label: string): string {
   const trimmed = value.trim();
   if (!trimmed) throw new Error(`${label} cannot be empty`);
   return trimmed;
+}
+
+function trimmedOptional(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function appendDocumentSection(lines: string[], title: string, content: string | undefined): void {

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -6,6 +6,8 @@ import {
   createHasnaCompanyAgentInputs,
   createIdentity,
   deprecatedHasnaCompanyAgentIdentifiers,
+  generateIdentityProfileImage,
+  generateIdentityVoice,
   hasnaCompanyAgentSpecs,
   IdentityStore,
   seedHasnaCompanyAgents,
@@ -40,6 +42,38 @@ describe("open-identities", () => {
     expect(identity.phones[0]).toMatchObject({ number: "+15555550123", primary: true });
     expect(identity.documents.prompt).toBe("You are Ava.");
     expect(identity.documents.soul).toBe("");
+    expect(identity.assets).toEqual([]);
+  });
+
+  test("creates identities with voice, profile image, and asset metadata", () => {
+    const identity = createIdentity({
+      kind: "agent",
+      fullName: "Media Agent",
+      uniqueIdentifier: "agent:media-agent",
+      voice: {
+        provider: "elevenlabs",
+        generatedVoiceId: "generated_voice_1",
+        sampleText: "A sample voice line for this media agent.",
+      },
+      profileImage: {
+        provider: "minimax",
+        prompt: "A profile image prompt.",
+        aspectRatio: "1:1",
+      },
+      assets: [
+        {
+          id: "asset_voice_1",
+          kind: "voice",
+          provider: "elevenlabs",
+          path: "/tmp/voice.mp3",
+          mediaType: "audio/mpeg",
+        },
+      ],
+    });
+
+    expect(identity.voice).toMatchObject({ provider: "elevenlabs", generatedVoiceId: "generated_voice_1" });
+    expect(identity.profileImage).toMatchObject({ provider: "minimax", aspectRatio: "1:1" });
+    expect(identity.assets[0]).toMatchObject({ id: "asset_voice_1", kind: "voice", status: "generated" });
   });
 
   test("persists and links contact points", async () => {
@@ -134,6 +168,74 @@ describe("open-identities", () => {
     });
   });
 
+  test("normalizes legacy store records without asset fields", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-legacy-"));
+    const storePath = join(dir, "identities.json");
+    const legacy = createIdentity({
+      kind: "agent",
+      fullName: "Legacy Agent",
+      uniqueIdentifier: "agent:legacy-agent",
+    }) as Record<string, unknown>;
+    delete legacy.assets;
+
+    await writeFile(storePath, `${JSON.stringify({ version: 1, identities: [legacy] }, null, 2)}\n`, "utf8");
+    const store = new IdentityStore({ filePath: storePath, auditPath: join(dir, "audit.jsonl") });
+    const identity = await store.require("agent:legacy-agent");
+
+    expect(identity.assets).toEqual([]);
+    expect(identity.documents.voice).toBe("");
+  });
+
+  test("generates media assets through injectable adapters", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-media-"));
+    const store = new IdentityStore({ filePath: join(dir, "identities.json"), auditPath: join(dir, "audit.jsonl") });
+    const identity = await store.create({
+      kind: "agent",
+      fullName: "Media Agent",
+      uniqueIdentifier: "agent:media-agent",
+      documents: { voice: "Clear and direct." },
+      agent: { role: "media testing" },
+    });
+
+    const voiceResult = await generateIdentityVoice(store, identity.id, {
+      outDir: join(dir, "assets"),
+      adapter: {
+        async designVoice(input) {
+          expect(input.description).toContain("Media Agent");
+          return {
+            audio: new Uint8Array([1, 2, 3]),
+            mediaType: "audio/mpeg",
+            generatedVoiceId: "generated_voice_1",
+            previewText: input.text,
+          };
+        },
+        async textToSpeech() {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const imageResult = await generateIdentityProfileImage(store, identity.id, {
+      outDir: join(dir, "assets"),
+      adapter: {
+        async generateProfileImage(input) {
+          expect(input.prompt).toContain("Media Agent");
+          return {
+            image: new Uint8Array([4, 5, 6]),
+            mediaType: "image/png",
+          };
+        },
+      },
+    });
+
+    expect(Array.from(await readFile(voiceResult.asset.path!))).toEqual([1, 2, 3]);
+    expect(Array.from(await readFile(imageResult.asset.path!))).toEqual([4, 5, 6]);
+    const updated = await store.require(identity.id);
+    expect(updated.assets).toHaveLength(2);
+    expect(updated.voice?.generatedVoiceId).toBe("generated_voice_1");
+    expect(updated.profileImage?.assetId).toBe(imageResult.asset.id);
+  });
+
   test("exports an Eve agent directory", async () => {
     const dir = await mkdtemp(join(tmpdir(), "open-identities-eve-"));
     const identity = createIdentity({
@@ -164,7 +266,63 @@ describe("open-identities", () => {
     const versionOutput = await captureStdout(async () => {
       await runCli(["--json", "version"]);
     });
-    expect(JSON.parse(versionOutput).version).toBe("0.1.2");
+    expect(JSON.parse(versionOutput).version).toBe("0.1.3");
+  });
+
+  test("CLI rejects missing values for non-boolean flags", async () => {
+    await expect(runCli(["create", "--kind"])).rejects.toThrow(/Missing value for --kind/);
+  });
+
+  test("CLI can clear media fields explicitly", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-clear-media-"));
+    const store = new IdentityStore({ filePath: join(dir, "identities.json"), auditPath: join(dir, "audit.jsonl") });
+    const identity = await store.create({
+      kind: "agent",
+      fullName: "Clear Media Agent",
+      uniqueIdentifier: "agent:clear-media-agent",
+      voice: { provider: "elevenlabs", voiceId: "voice_1" },
+      profileImage: { provider: "minimax", model: "image-01" },
+    });
+
+    const cleared = await store.update(identity.id, { voice: null, profileImage: null });
+    expect(cleared.voice).toBeUndefined();
+    expect(cleared.profileImage).toBeUndefined();
+  });
+
+  test("media status is metadata only", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-media-status-"));
+    const store = new IdentityStore({ filePath: join(dir, "identities.json"), auditPath: join(dir, "audit.jsonl") });
+    const identity = await store.create({
+      kind: "agent",
+      fullName: "Status Media Agent",
+      uniqueIdentifier: "agent:status-media-agent",
+      voice: { provider: "elevenlabs", voiceId: "voice_1", sampleText: "secret sample" },
+      profileImage: { provider: "minimax", prompt: "secret prompt" },
+      assets: [{ kind: "voice", provider: "elevenlabs", path: "/tmp/secret.mp3", status: "generated" }],
+    });
+
+    const output = await captureStdout(async () => {
+      await runCli(["--json", "--store", join(dir, "identities.json"), "media", "status", identity.id]);
+    });
+    expect(output).not.toContain("/tmp/secret.mp3");
+    expect(output).not.toContain("secret sample");
+    expect(output).not.toContain("secret prompt");
+    expect(JSON.parse(output).assets.count).toBe(1);
+  });
+
+  test("CLI media roster dry-run plans generation without mutating the store", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-media-cli-"));
+    const storePath = join(dir, "identities.json");
+    const output = await captureStdout(async () => {
+      await runCli(["--json", "--store", storePath, "media", "generate-roster", "--voices", "--profile-images", "--dry-run", "--limit", "1"]);
+    });
+    const parsed = JSON.parse(output);
+
+    expect(parsed.planned).toBe(2);
+    expect(parsed.generated).toHaveLength(2);
+    expect(parsed.generated.every((item: { asset: { status: string } }) => item.asset.status === "planned")).toBe(true);
+    const store = new IdentityStore({ filePath: storePath, auditPath: join(dir, "audit.jsonl") });
+    expect(await store.list()).toHaveLength(0);
   });
 
   test("Hasna company roster uses Greek or Roman agent names and internal hasna.xyz emails", () => {
@@ -231,6 +389,8 @@ describe("open-identities", () => {
       expect(input.documents?.soul?.trim()).not.toBe("");
       expect(input.documents?.personality?.trim()).not.toBe("");
       expect(input.documents?.ethos?.trim()).not.toBe("");
+      expect(input.voice).toMatchObject({ provider: "elevenlabs" });
+      expect(input.profileImage).toMatchObject({ provider: "minimax", aspectRatio: "1:1" });
     }
   });
 
@@ -266,8 +426,11 @@ describe("open-identities", () => {
     const calliope = await updatedStore.require("agent:calliope");
     expect(calliope.emails[0]).toMatchObject({ address: "calliope@hasna.xyz", label: "internal", primary: true });
     expect(calliope.emails.some((email) => email.address === "marketing@hasna.com" && email.label === "public")).toBe(true);
+    expect(calliope.voice).toMatchObject({ provider: "elevenlabs", model: "eleven_multilingual_ttv_v2" });
+    expect(calliope.profileImage).toMatchObject({ provider: "minimax", model: "image-01" });
     expect(await readFile(join(docsDir, "calliope", "PROMPT.md"), "utf8")).toContain("calliope@hasna.xyz");
     expect(await readFile(join(docsDir, "calliope", "IDENTITY.md"), "utf8")).toContain("marketing@hasna.com");
+    expect(await readFile(join(docsDir, "calliope", "IDENTITY.md"), "utf8")).toContain("Voice provider: elevenlabs");
   });
 });
 

@@ -12,7 +12,12 @@ export {
   identityToAgentManifest,
   normalizeEmail,
   normalizeIdentifier,
+  normalizeIdentityAsset,
+  normalizeIdentityAssets,
+  normalizePersistedIdentity,
+  normalizeProfileImage,
   normalizePhone,
+  normalizeVoiceProfile,
   nowIso,
   publicIdentityIdentifier,
   renderIdentityInstructions,
@@ -23,6 +28,15 @@ export { createAgentIdentityRef, createEcosystemRegistrationManifest } from "./e
 export { listEveDocumentKeys, writeEveAgent } from "./eve.js";
 export { applyContactPointSyncResults, syncIdentityContactPoints, syncIdentityContactPointsAndUpdate } from "./integrations.js";
 export { getIdentityReferenceStatus, getIdentityStoreStatus } from "./status.js";
+export {
+  createElevenLabsAdapter,
+  createMiniMaxImageAdapter,
+  detectIdentityMediaSecrets,
+  generateHasnaRosterMedia,
+  generateIdentityProfileImage,
+  generateIdentityVoice,
+  getIdentityMediaAssetsDir,
+} from "./media.js";
 export {
   HASNA_COMPANY_AGENT_ROSTER_VERSION,
   createHasnaCompanyAgentInputs,
@@ -50,6 +64,23 @@ export type {
   TelephonyIdentitySyncInput,
 } from "./integrations.js";
 export type {
+  ElevenLabsCreatedVoice,
+  ElevenLabsTextToSpeechResult,
+  ElevenLabsVoiceAdapter,
+  ElevenLabsVoiceDesignResult,
+  GenerateHasnaRosterMediaOptions,
+  GenerateHasnaRosterMediaResult,
+  GenerateIdentityProfileImageOptions,
+  GenerateIdentityVoiceOptions,
+  GeneratedIdentityMediaResult,
+  IdentityMediaAdapters,
+  IdentityMediaSecretStatus,
+  MiniMaxImageAdapter,
+  MiniMaxProfileImageResult,
+  ProviderSecretStatus,
+  VoiceGenerationMode,
+} from "./media.js";
+export type {
   HasnaCompanyAgentSpec,
   SeedHasnaCompanyAgentsOptions,
   SeedHasnaCompanyAgentsResult,
@@ -57,6 +88,7 @@ export type {
 export type {
   IdentityReferenceStatus,
   IdentityStatusRef,
+  IdentityStoreStatus,
 } from "./status.js";
 export type {
   AgentProfile,
@@ -64,14 +96,21 @@ export type {
   CreateIdentityInput,
   EmailAddress,
   Identity,
+  IdentityAsset,
+  IdentityAssetInput,
+  IdentityAssetKind,
+  IdentityAssetStatus,
   IdentityContactCard,
   IdentityDocumentKey,
   IdentityDocumentSet,
   IdentityIdentifier,
   IdentityKind,
+  IdentityMediaSource,
   PhoneNumber,
+  ProfileImage,
   SyncRef,
   SyncStatus,
   UpdateIdentityInput,
   VerificationStatus,
+  VoiceProfile,
 } from "./types.js";

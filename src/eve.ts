@@ -24,6 +24,7 @@ const SKILL_DOCUMENTS: IdentityDocumentKey[] = [
   "goals",
   "context",
   "consent",
+  "voice",
 ];
 
 export async function writeEveAgent(identity: Identity, options: EveExportOptions): Promise<EveExportResult> {
@@ -109,6 +110,5 @@ async function write(dir: string, name: string, content: string, files: string[]
 }
 
 export function listEveDocumentKeys(): IdentityDocumentKey[] {
-  return identityDocumentKeys.filter((key) => key !== "memory" && key !== "voice");
+  return identityDocumentKeys.filter((key) => key !== "memory");
 }
-

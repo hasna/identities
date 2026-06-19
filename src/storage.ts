@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { addEmail, addPhone, createIdentity, identityToContactCard, updateIdentity } from "./core.js";
+import { addEmail, addPhone, createIdentity, identityToContactCard, normalizePersistedIdentity, updateIdentity } from "./core.js";
 import type { CreateIdentityInput, EmailAddress, Identity, IdentityContactCard, IdentityIdentifier, PhoneNumber, UpdateIdentityInput } from "./types.js";
 
 export interface IdentityStoreOptions {
@@ -29,6 +29,7 @@ export function getIdentityAuditPath(): string {
 export class IdentityStore {
   readonly filePath: string;
   readonly auditPath: string;
+  private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(options: IdentityStoreOptions = {}) {
     this.filePath = options.filePath ?? getIdentityStorePath();
@@ -55,44 +56,43 @@ export class IdentityStore {
   }
 
   async create(input: CreateIdentityInput): Promise<Identity> {
-    const store = await this.readStore();
-    const identity = createIdentity(input);
-    assertNoDuplicate(store.identities, identity);
-    store.identities.push(identity);
-    await this.writeStore(store);
-    await this.writeAuditEvent("create", identity.id);
-    return identity;
+    return this.withMutation(async () => {
+      const store = await this.readStore();
+      const identity = createIdentity(input);
+      assertNoDuplicate(store.identities, identity);
+      store.identities.push(identity);
+      await this.writeStore(store);
+      await this.writeAuditEvent("create", identity.id);
+      return identity;
+    });
   }
 
   async update(target: string, input: UpdateIdentityInput): Promise<Identity> {
-    const store = await this.readStore();
-    const index = store.identities.findIndex((identity) => matchesIdentity(identity, target));
-    if (index === -1) throw new Error(`Identity not found: ${target}`);
-
-    const updated = updateIdentity(store.identities[index], input);
-    assertNoDuplicate(store.identities, updated, store.identities[index].id);
-    store.identities[index] = updated;
-    await this.writeStore(store);
-    await this.writeAuditEvent("update", updated.id);
-    return updated;
+    return this.withMutation(async () => {
+      return await this.updateUnlocked(target, input);
+    });
   }
 
   async delete(target: string): Promise<boolean> {
-    const store = await this.readStore();
-    const next = store.identities.filter((identity) => !matchesIdentity(identity, target));
-    if (next.length === store.identities.length) return false;
-    await this.writeStore({ ...store, identities: next });
-    await this.writeAuditEvent("delete", target);
-    return true;
+    return this.withMutation(async () => {
+      const store = await this.readStore();
+      const next = store.identities.filter((identity) => !matchesIdentity(identity, target));
+      if (next.length === store.identities.length) return false;
+      await this.writeStore({ ...store, identities: next });
+      await this.writeAuditEvent("delete", target);
+      return true;
+    });
   }
 
   async replaceAll(identities: Identity[]): Promise<void> {
-    const normalized = identities.map((identity) => updateIdentity(identity, {}));
-    for (const identity of normalized) {
-      assertNoDuplicate(normalized, identity, identity.id);
-    }
-    await this.writeStore({ version: 1, identities: normalized });
-    await this.writeAuditEvent("replace-all", `${normalized.length}`);
+    return this.withMutation(async () => {
+      const normalized = identities.map((identity) => updateIdentity(identity, {}));
+      for (const identity of normalized) {
+        assertNoDuplicate(normalized, identity, identity.id);
+      }
+      await this.writeStore({ version: 1, identities: normalized });
+      await this.writeAuditEvent("replace-all", `${normalized.length}`);
+    });
   }
 
   async validate(): Promise<{ valid: true; count: number }> {
@@ -104,20 +104,40 @@ export class IdentityStore {
   }
 
   async linkEmail(target: string, email: EmailAddress | string): Promise<Identity> {
-    const identity = await this.require(target);
-    return this.update(identity.id, addEmail(identity, email));
+    return this.withMutation(async () => {
+      const store = await this.readStore();
+      const index = store.identities.findIndex((identity) => matchesIdentity(identity, target));
+      if (index === -1) throw new Error(`Identity not found: ${target}`);
+
+      const updated = addEmail(store.identities[index], email);
+      assertNoDuplicate(store.identities, updated, store.identities[index].id);
+      store.identities[index] = updated;
+      await this.writeStore(store);
+      await this.writeAuditEvent("update", updated.id);
+      return updated;
+    });
   }
 
   async linkPhone(target: string, phone: PhoneNumber | string): Promise<Identity> {
-    const identity = await this.require(target);
-    return this.update(identity.id, addPhone(identity, phone));
+    return this.withMutation(async () => {
+      const store = await this.readStore();
+      const index = store.identities.findIndex((identity) => matchesIdentity(identity, target));
+      if (index === -1) throw new Error(`Identity not found: ${target}`);
+
+      const updated = addPhone(store.identities[index], phone);
+      assertNoDuplicate(store.identities, updated, store.identities[index].id);
+      store.identities[index] = updated;
+      await this.writeStore(store);
+      await this.writeAuditEvent("update", updated.id);
+      return updated;
+    });
   }
 
   private async readStore(): Promise<IdentityStoreFile> {
     try {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as IdentityStoreFile;
-      return { version: 1, identities: parsed.identities ?? [] };
+      return { version: 1, identities: (parsed.identities ?? []).map(normalizePersistedIdentity) };
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {
         return { version: 1, identities: [] };
@@ -140,6 +160,34 @@ export class IdentityStore {
       `${JSON.stringify({ action, target, at: new Date().toISOString(), store: this.filePath })}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
+  }
+
+  private async updateUnlocked(target: string, input: UpdateIdentityInput): Promise<Identity> {
+    const store = await this.readStore();
+    const index = store.identities.findIndex((identity) => matchesIdentity(identity, target));
+    if (index === -1) throw new Error(`Identity not found: ${target}`);
+
+    const updated = updateIdentity(store.identities[index], input);
+    assertNoDuplicate(store.identities, updated, store.identities[index].id);
+    store.identities[index] = updated;
+    await this.writeStore(store);
+    await this.writeAuditEvent("update", updated.id);
+    return updated;
+  }
+
+  private async withMutation<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.mutationQueue;
+    let release!: () => void;
+    this.mutationQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await previous.catch(() => undefined);
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
   }
 }
 

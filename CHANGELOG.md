@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3
+
+- Added first-class `voice`, `profileImage`, and generated `assets` metadata to identities.
+- Added ElevenLabs voice design/TTS and MiniMax profile image generation through the CLI and SDK.
+- Added roster-wide media generation and dry-run support for all Hasna company agents.
+- Exported voice guidance and media references into Eve manifests.
+- Published root `VOICE.md` and added media provider docs.
+
 ## 0.1.2
 
 - Renamed every seeded Hasna company agent to a Greek or Roman canonical agent name.

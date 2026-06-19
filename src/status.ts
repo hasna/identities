@@ -10,6 +10,13 @@ import {
   deprecatedHasnaCompanyAgentIdentifiers,
   hasnaCompanyAgentSpecs,
 } from "./roster.js";
+import {
+  identityIdentifierToString,
+  projectIdentityAsset,
+  projectProfileImage,
+  projectVoiceProfile,
+  publicIdentityIdentifier,
+} from "./core.js";
 
 const PACKAGE_NAME = "@hasna/identities";
 const FALLBACK_PACKAGE_VERSION = "0.1.3";
@@ -104,6 +111,8 @@ export interface IdentityReferenceStatus {
     statusOutputIsMetadataOnly: true;
   };
 }
+
+export type IdentityStoreStatus = IdentityReferenceStatus;
 
 export async function getIdentityReferenceStatus(store = new IdentityStore()): Promise<IdentityReferenceStatus> {
   const identities = await store.list();
@@ -236,6 +245,58 @@ export async function getIdentityReferenceStatus(store = new IdentityStore()): P
 }
 
 export const getIdentityStoreStatus = getIdentityReferenceStatus;
+
+export function projectIdentityMediaStatus(identity: Identity): {
+  identityId: string;
+  identifier: string;
+  kind: IdentityKind;
+  name: string;
+  voice?: ReturnType<typeof projectVoiceProfile>;
+  profileImage?: ReturnType<typeof projectProfileImage>;
+  assets: {
+    count: number;
+    byKind: Record<"voice" | "profile-image", number>;
+    items: ReturnType<typeof projectIdentityAsset>[];
+  };
+} {
+  const assets = identity.assets ?? [];
+  return {
+    identityId: identity.id,
+    identifier: identityIdentifierToString(publicIdentityIdentifier(identity)),
+    kind: identity.kind,
+    name: identity.displayName ?? identity.fullName,
+    voice: projectVoiceProfile(identity.voice),
+    profileImage: projectProfileImage(identity.profileImage),
+    assets: {
+      count: assets.length,
+      byKind: {
+        voice: assets.filter((asset) => asset.kind === "voice").length,
+        "profile-image": assets.filter((asset) => asset.kind === "profile-image").length,
+      },
+      items: assets.map(projectIdentityAsset),
+    },
+  };
+}
+
+export function projectIdentityMediaSummary(identity: Identity): {
+  identityId: string;
+  identifier: string;
+  kind: IdentityKind;
+  name: string;
+  assets: number;
+  hasVoice: boolean;
+  hasProfileImage: boolean;
+} {
+  return {
+    identityId: identity.id,
+    identifier: identityIdentifierToString(publicIdentityIdentifier(identity)),
+    kind: identity.kind,
+    name: identity.displayName ?? identity.fullName,
+    assets: identity.assets.length,
+    hasVoice: Boolean(identity.voice),
+    hasProfileImage: Boolean(identity.profileImage),
+  };
+}
 
 function identityStatusRef(identity: Identity): IdentityStatusRef {
   return {

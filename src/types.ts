@@ -23,6 +23,32 @@ export type VerificationStatus = "unverified" | "pending" | "verified" | "revoke
 
 export type SyncStatus = "local" | "pending" | "synced" | "failed";
 
+export type IdentityAssetKind = "voice" | "profile-image";
+
+export type IdentityAssetStatus = "planned" | "generated" | "failed";
+
+export type IdentityMediaSource = "generated" | "imported" | "external";
+
+export interface IdentityAsset {
+  id: string;
+  kind: IdentityAssetKind;
+  provider: string;
+  status: IdentityAssetStatus;
+  source?: IdentityMediaSource;
+  path?: string;
+  url?: string;
+  mediaType?: string;
+  bytes?: number;
+  checksum?: string;
+  model?: string;
+  prompt?: string;
+  generatedAt?: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export type IdentityAssetInput = Omit<IdentityAsset, "id" | "status"> & Partial<Pick<IdentityAsset, "id" | "status">>;
+
 export interface SyncRef {
   provider: string;
   externalId?: string;
@@ -61,6 +87,36 @@ export interface PhoneNumber {
   sync?: SyncRef;
 }
 
+export interface VoiceProfile {
+  provider: string;
+  voiceId?: string;
+  generatedVoiceId?: string;
+  name?: string;
+  description?: string;
+  model?: string;
+  outputFormat?: string;
+  sampleText?: string;
+  assetId?: string;
+  previewAssetId?: string;
+  sync?: SyncRef;
+  createdAt?: string;
+  updatedAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ProfileImage {
+  provider: string;
+  model?: string;
+  prompt?: string;
+  aspectRatio?: string;
+  assetId?: string;
+  url?: string;
+  sync?: SyncRef;
+  createdAt?: string;
+  updatedAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export type IdentityDocumentSet = Partial<Record<IdentityDocumentKey, string>> & Record<string, string | undefined>;
 
 export interface Identity {
@@ -73,6 +129,9 @@ export interface Identity {
   emails: EmailAddress[];
   phones: PhoneNumber[];
   documents: IdentityDocumentSet;
+  voice?: VoiceProfile;
+  profileImage?: ProfileImage;
+  assets: IdentityAsset[];
   agent?: AgentProfile;
   traits: Record<string, unknown>;
   metadata: Record<string, unknown>;
@@ -102,6 +161,9 @@ export interface CreateIdentityInput {
   emails?: Array<EmailAddress | string>;
   phones?: Array<PhoneNumber | string>;
   documents?: IdentityDocumentSet;
+  voice?: Partial<VoiceProfile>;
+  profileImage?: Partial<ProfileImage>;
+  assets?: IdentityAssetInput[];
   agent?: Partial<AgentProfile>;
   traits?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -118,6 +180,9 @@ export interface UpdateIdentityInput {
   emails?: Array<EmailAddress | string>;
   phones?: Array<PhoneNumber | string>;
   documents?: IdentityDocumentSet;
+  voice?: Partial<VoiceProfile> | null;
+  profileImage?: Partial<ProfileImage> | null;
+  assets?: IdentityAssetInput[];
   agent?: Partial<AgentProfile>;
   traits?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -147,5 +212,8 @@ export interface AgentRegistrationManifest {
   schedules: string[];
   subagents: string[];
   documents: IdentityDocumentSet;
+  voice?: VoiceProfile;
+  profileImage?: ProfileImage;
+  assets: IdentityAsset[];
   metadata: Record<string, unknown>;
 }

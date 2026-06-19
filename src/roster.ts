@@ -398,6 +398,29 @@ function specToIdentityInput(spec: HasnaCompanyAgentSpec): CreateIdentityInput {
       ...(spec.publicEmail ? [{ address: spec.publicEmail, label: "public", primary: false, verified: false }] : []),
     ],
     documents: documentsForSpec(spec, internalEmail),
+    voice: {
+      provider: "elevenlabs",
+      name: spec.fullName,
+      description: voiceDescriptionForSpec(spec),
+      model: "eleven_multilingual_ttv_v2",
+      outputFormat: "mp3_44100_128",
+      sampleText: voiceSampleForSpec(spec),
+      metadata: {
+        source: "hasna-company-roster",
+        visibility: "internal",
+      },
+    },
+    profileImage: {
+      provider: "minimax",
+      model: "image-01",
+      aspectRatio: "1:1",
+      prompt: profileImagePromptForSpec(spec),
+      metadata: {
+        source: "hasna-company-roster",
+        visibility: "internal",
+      },
+    },
+    assets: [],
     agent: {
       role: spec.role,
       capabilities: spec.capabilities,
@@ -456,8 +479,34 @@ function documentsForSpec(spec: HasnaCompanyAgentSpec, internalEmail: string): I
     ].join("\n\n"),
     memory: "Remember identity changes, external contact points, sync references, and role boundaries as durable state rather than conversational assumptions.",
     consent: "Do not sync sensitive identifiers or private role context to external systems unless an explicit adapter contract allows it and a human owner has approved the sync.",
-    voice: "Concise, operational, and specific. Avoid promotional language unless this role explicitly owns external marketing or communications.",
+    voice: [
+      "Concise, operational, and specific. Avoid promotional language unless this role explicitly owns external marketing or communications.",
+      `Voice generation brief: ${voiceDescriptionForSpec(spec)}`,
+    ].join("\n\n"),
   };
+}
+
+function voiceDescriptionForSpec(spec: HasnaCompanyAgentSpec): string {
+  return [
+    `A clear professional AI agent voice for ${spec.fullName}.`,
+    `The voice supports ${spec.role.toLowerCase()} in the ${spec.department} department.`,
+    "It should sound original, calm, precise, company-internal, and practical, with no celebrity or public-figure resemblance.",
+  ].join(" ");
+}
+
+function voiceSampleForSpec(spec: HasnaCompanyAgentSpec): string {
+  return [
+    `Hello, I am ${spec.fullName}.`,
+    `I coordinate ${spec.role.toLowerCase()} for Hasna.`,
+    "I keep identity, context, and follow-through explicit so company agents and humans can work from the same durable record.",
+  ].join(" ");
+}
+
+function profileImagePromptForSpec(spec: HasnaCompanyAgentSpec): string {
+  return [
+    `Professional square profile portrait for ${spec.fullName}, a fictional AI agent responsible for ${spec.role}.`,
+    "Modern company avatar, original face, subtle Greco-Roman naming inspiration, natural lighting, clean background, high detail, no text, no logo, no watermark.",
+  ].join(" ");
 }
 
 function toUpdateInput(input: CreateIdentityInput) {
@@ -470,6 +519,9 @@ function toUpdateInput(input: CreateIdentityInput) {
     emails: input.emails,
     phones: input.phones,
     documents: input.documents,
+    voice: input.voice,
+    profileImage: input.profileImage,
+    assets: input.assets && input.assets.length > 0 ? input.assets : undefined,
     agent: input.agent,
     traits: input.traits,
     metadata: input.metadata,
@@ -492,6 +544,9 @@ function renderIdentitySummary(identity: Identity): string {
     `Primary internal email: ${primaryEmail?.address ?? "none"}`,
     `Public email: ${publicEmails.length > 0 ? publicEmails.join(", ") : "none"}`,
     `Role: ${identity.agent?.role ?? "none"}`,
+    `Voice provider: ${identity.voice?.provider ?? "none"}`,
+    `Profile image provider: ${identity.profileImage?.provider ?? "none"}`,
+    `Generated assets: ${(identity.assets ?? []).length}`,
     "",
     "Documents in this directory are generated from the open-identities roster seed.",
     "",

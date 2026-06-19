@@ -2,21 +2,41 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { IdentityStore } from "./storage.js";
+import { getIdentityStoreStatus, projectIdentityMediaStatus, projectIdentityMediaSummary } from "./status.js";
 import { identityDocumentKeys, type Identity, type IdentityDocumentKey, type IdentityKind } from "./types.js";
 import { createEcosystemRegistrationManifest, createAgentIdentityRef } from "./ecosystem.js";
 import { identityToAgentManifest } from "./core.js";
 import { syncIdentityContactPointsAndUpdate } from "./integrations.js";
 import { writeEveAgent } from "./eve.js";
+import {
+  detectIdentityMediaSecrets,
+  generateHasnaRosterMedia,
+  generateIdentityProfileImage,
+  generateIdentityVoice,
+  getIdentityMediaAssetsDir,
+  type VoiceGenerationMode,
+} from "./media.js";
 import { seedHasnaCompanyAgents } from "./roster.js";
-import { getIdentityReferenceStatus } from "./status.js";
 
 interface ParsedArgs {
   positionals: string[];
   flags: Map<string, string[]>;
 }
 
-const version = "0.1.2";
-const booleanFlags = new Set(["json", "help", "h", "version", "keep-deprecated"]);
+const version = "0.1.3";
+const booleanFlags = new Set([
+  "json",
+  "help",
+  "h",
+  "version",
+  "keep-deprecated",
+  "dry-run",
+  "create-voice",
+  "voices",
+  "profile-images",
+  "clear-voice",
+  "clear-profile-image",
+]);
 
 const helpText = `identities
 
@@ -27,6 +47,7 @@ Commands:
   create --name <name> [--kind human|agent|organization|service] [--identifier scheme:value] [--email address] [--phone number]
   update <id|identifier> [--name <name>] [--display-name <name>] [--kind kind]
   list
+  status
   show <id|identifier|email|phone>
   delete <id|identifier>
   link-email <id|identifier> <email>
@@ -39,6 +60,13 @@ Commands:
   agent register --name <name> [--identifier agent:name]
   agent seed-company [--docs-dir dir] [--keep-deprecated]
   eve export <id|identifier> --out <dir>
+  media doctor
+  media status [id|identifier]
+  media generate-voice <id|identifier> [--voice-id id] [--voice-description text] [--text text] [--model model] [--output-format format] [--out-dir dir] [--dry-run] [--create-voice]
+  media generate-profile-image <id|identifier> [--prompt text] [--model model] [--aspect-ratio 1:1] [--out-dir dir] [--dry-run]
+  media generate-roster [--voices] [--profile-images] [--out-dir dir] [--dry-run] [--limit n]
+  update ... [--clear-voice] [--clear-profile-image]
+  asset list <id|identifier>
   sync <id|identifier>
   validate
   status
@@ -80,11 +108,6 @@ async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean)
     return;
   }
 
-  if (command === "status") {
-    output(await getIdentityReferenceStatus(store), json);
-    return;
-  }
-
   if (command === "list") {
     const cards = await store.listCards();
     if (json) output(cards, json);
@@ -93,6 +116,11 @@ async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean)
         console.log([card.id, card.kind, card.fullName, card.primaryEmail ?? "", card.primaryPhone ?? ""].join("\t"));
       }
     }
+    return;
+  }
+
+  if (command === "status") {
+    output(await getIdentityStoreStatus(store), json);
     return;
   }
 
@@ -137,6 +165,16 @@ async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean)
 
   if (command === "eve") {
     await dispatchEve(rest, parsed, store, json);
+    return;
+  }
+
+  if (command === "media") {
+    await dispatchMedia(rest, parsed, store, json);
+    return;
+  }
+
+  if (command === "asset") {
+    await dispatchAsset(rest, store, json);
     return;
   }
 
@@ -272,6 +310,92 @@ async function dispatchEve(rest: string[], parsed: ParsedArgs, store: IdentitySt
   output(await writeEveAgent(identity, { outDir, model: flagValue(parsed, "model") }), json);
 }
 
+async function dispatchMedia(rest: string[], parsed: ParsedArgs, store: IdentityStore, json: boolean): Promise<void> {
+  const [subcommand, target] = rest;
+
+  if (subcommand === "doctor" || subcommand === "secrets") {
+    output({ assetsDir: getIdentityMediaAssetsDir(), secrets: detectIdentityMediaSecrets() }, json);
+    return;
+  }
+
+  if (subcommand === "status") {
+    if (target) {
+      const identity = await store.require(target);
+      output(projectIdentityMediaStatus(identity), json);
+      return;
+    }
+
+    const identities = await store.list();
+    output({
+      count: identities.length,
+      assetsDir: getIdentityMediaAssetsDir(),
+      identities: identities.map(projectIdentityMediaSummary),
+    }, json);
+    return;
+  }
+
+  if (subcommand === "generate-voice") {
+    output(await generateIdentityVoice(store, required(target, "media generate-voice requires an identity target"), {
+      mode: parseVoiceGenerationMode(flagValue(parsed, "mode")),
+      voiceId: flagValue(parsed, "voice-id"),
+      voiceDescription: flagValue(parsed, "voice-description") ?? flagValue(parsed, "description"),
+      text: flagValue(parsed, "text"),
+      model: flagValue(parsed, "model"),
+      outputFormat: flagValue(parsed, "output-format"),
+      outDir: flagValue(parsed, "out-dir"),
+      dryRun: hasFlag(parsed, "dry-run"),
+      createVoice: hasFlag(parsed, "create-voice"),
+    }), json);
+    return;
+  }
+
+  if (subcommand === "generate-profile-image" || subcommand === "generate-picture" || subcommand === "generate-profile-picture") {
+    output(await generateIdentityProfileImage(store, required(target, "media generate-profile-image requires an identity target"), {
+      prompt: flagValue(parsed, "prompt"),
+      model: flagValue(parsed, "model"),
+      aspectRatio: flagValue(parsed, "aspect-ratio"),
+      outDir: flagValue(parsed, "out-dir"),
+      dryRun: hasFlag(parsed, "dry-run"),
+    }), json);
+    return;
+  }
+
+  if (subcommand === "generate-roster") {
+    output(await generateHasnaRosterMedia(store, {
+      voices: hasFlag(parsed, "voices") ? true : undefined,
+      profileImages: hasFlag(parsed, "profile-images") ? true : undefined,
+      outDir: flagValue(parsed, "out-dir"),
+      dryRun: hasFlag(parsed, "dry-run"),
+      limit: parseOptionalInteger(flagValue(parsed, "limit"), "limit"),
+      voice: {
+        mode: parseVoiceGenerationMode(flagValue(parsed, "mode")),
+        voiceId: flagValue(parsed, "voice-id"),
+        model: flagValue(parsed, "voice-model") ?? flagValue(parsed, "model"),
+        outputFormat: flagValue(parsed, "output-format"),
+        createVoice: hasFlag(parsed, "create-voice"),
+      },
+      profileImage: {
+        model: flagValue(parsed, "image-model") ?? flagValue(parsed, "model"),
+        aspectRatio: flagValue(parsed, "aspect-ratio"),
+      },
+    }), json);
+    return;
+  }
+
+  throw new Error(`Unknown media command: ${subcommand ?? ""}`);
+}
+
+async function dispatchAsset(rest: string[], store: IdentityStore, json: boolean): Promise<void> {
+  const [subcommand, target] = rest;
+  if (subcommand === "list") {
+    const identity = await store.require(required(target, "asset list requires an identity target"));
+    output(identity.assets ?? [], json);
+    return;
+  }
+
+  throw new Error(`Unknown asset command: ${subcommand ?? ""}`);
+}
+
 function createInputFromFlags(parsed: ParsedArgs) {
   const name = flagValue(parsed, "name") ?? parsed.positionals[1];
   const kind = parseKind(flagValue(parsed, "kind") ?? "human");
@@ -300,6 +424,8 @@ function createUpdateFromFlags(parsed: ParsedArgs) {
     emails: flagValues(parsed, "email").length > 0 ? flagValues(parsed, "email") : undefined,
     phones: flagValues(parsed, "phone").length > 0 ? flagValues(parsed, "phone") : undefined,
     documents: Object.keys(documents).length > 0 ? documents : undefined,
+    voice: hasFlag(parsed, "clear-voice") ? null : undefined,
+    profileImage: hasFlag(parsed, "clear-profile-image") ? null : undefined,
     agent,
   };
 }
@@ -343,8 +469,11 @@ function parseArgs(args: string[]): ParsedArgs {
       continue;
     }
     const next = args[index + 1];
-    const value = next && !next.startsWith("--") ? next : "true";
-    if (next && !next.startsWith("--")) index += 1;
+    if (!next || next.startsWith("--")) {
+      throw new Error(`Missing value for --${key}`);
+    }
+    const value = next;
+    index += 1;
     flags.set(key, [...(flags.get(key) ?? []), value]);
   }
 
@@ -372,6 +501,19 @@ function required<T>(value: T | undefined, message: string): T {
 function parseKind(kind: string): IdentityKind {
   if (kind === "human" || kind === "agent" || kind === "organization" || kind === "service") return kind;
   throw new Error(`Invalid identity kind: ${kind}`);
+}
+
+function parseVoiceGenerationMode(value: string | undefined): VoiceGenerationMode | undefined {
+  if (value === undefined) return undefined;
+  if (value === "design" || value === "text-to-speech") return value;
+  throw new Error(`Invalid voice generation mode: ${value}`);
+}
+
+function parseOptionalInteger(value: string | undefined, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) throw new Error(`${label} must be a positive integer`);
+  return parsed;
 }
 
 function requireDocumentKey(value: string | undefined): IdentityDocumentKey {

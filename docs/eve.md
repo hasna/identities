@@ -17,3 +17,4 @@ The exporter writes:
 
 Private records such as sensitive identifiers are not written into Eve exports by default. If an identity's canonical unique identifier is sensitive, generated manifests use `open-identities:<identity.id>`.
 
+Voice guidance is exported as an Eve skill document, and `identity.json` includes first-class `voice`, `profileImage`, and `assets` references. Generated audio and image bytes remain external files owned by `open-identities`.
