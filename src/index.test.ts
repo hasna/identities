@@ -236,23 +236,88 @@ describe("open-identities", () => {
     expect(updated.profileImage?.assetId).toBe(imageResult.asset.id);
   });
 
+  test("preserves previously stored assets when later updates use stale snapshots", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-media-race-"));
+    const store = new IdentityStore({ filePath: join(dir, "identities.json"), auditPath: join(dir, "audit.jsonl") });
+    const identity = await store.create({
+      kind: "agent",
+      fullName: "Race Condition Agent",
+      uniqueIdentifier: "agent:race-condition-agent",
+    });
+
+    const snapshot = await store.require(identity.id);
+    await store.update(identity.id, {
+      assets: [
+        {
+          id: "asset_voice_1",
+          kind: "voice",
+          provider: "elevenlabs",
+        },
+      ],
+      voice: { provider: "elevenlabs" },
+    });
+
+    await store.update(identity.id, {
+      assets: [
+        ...snapshot.assets,
+        {
+          id: "asset_profile_1",
+          kind: "profile-image",
+          provider: "minimax",
+        },
+      ],
+      profileImage: { provider: "minimax" },
+    });
+
+    const updated = await store.require(identity.id);
+    expect(updated.assets).toHaveLength(2);
+    expect(updated.voice?.provider).toBe("elevenlabs");
+    expect(updated.profileImage?.provider).toBe("minimax");
+  });
+
   test("exports an Eve agent directory", async () => {
     const dir = await mkdtemp(join(tmpdir(), "open-identities-eve-"));
     const identity = createIdentity({
       kind: "agent",
       fullName: "Eve Agent",
-      uniqueIdentifier: "agent:eve-agent",
+      uniqueIdentifier: { scheme: "ssn", value: "123-45-6789", sensitive: true },
       documents: {
         prompt: "Act as Eve Agent.",
         capabilities: "Identity lookup and sync.",
       },
+      voice: {
+        provider: "elevenlabs",
+        voiceId: "voice_1",
+        generatedVoiceId: "generated_voice_1",
+        sampleText: "secret sample text",
+      },
+      profileImage: {
+        provider: "minimax",
+        prompt: "secret image prompt",
+        aspectRatio: "1:1",
+      },
+      assets: [
+        {
+          id: "asset_voice_1",
+          kind: "voice",
+          provider: "elevenlabs",
+          path: "/tmp/private-voice.mp3",
+          mediaType: "audio/mpeg",
+        },
+      ],
       agent: { model: "openai/gpt-5.4-mini", schedules: ["daily identity audit"] },
     });
 
     const result = await writeEveAgent(identity, { outDir: dir });
     expect(result.files.some((file) => file.endsWith("agent/instructions.md"))).toBe(true);
-    expect(await readFile(join(dir, "agent", "instructions.md"), "utf8")).toContain("Act as Eve Agent.");
-    expect(await readFile(join(dir, "agent", "identity.json"), "utf8")).toContain("agent:eve-agent");
+    const instructions = await readFile(join(dir, "agent", "instructions.md"), "utf8");
+    const manifest = await readFile(join(dir, "agent", "identity.json"), "utf8");
+    expect(instructions).toContain("Act as Eve Agent.");
+    expect(manifest).toContain("open-identities:oid_");
+    expect(manifest).not.toContain("Act as Eve Agent.");
+    expect(manifest).not.toContain("secret sample text");
+    expect(manifest).not.toContain("secret image prompt");
+    expect(manifest).not.toContain("/tmp/private-voice.mp3");
   });
 
   test("CLI supports leading boolean flags and isolated store", async () => {

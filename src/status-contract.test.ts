@@ -153,4 +153,56 @@ describe("identity reference status contract", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test("media status for a single identity stays privacy-safe", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-media-status-"));
+    const storePath = join(dir, "identities.json");
+    const auditPath = join(dir, "audit.jsonl");
+    const store = new IdentityStore({ filePath: storePath, auditPath });
+
+    const identity = await store.create({
+      kind: "agent",
+      fullName: "Media Status Agent",
+      uniqueIdentifier: { scheme: "ssn", value: "123-45-6789", sensitive: true },
+      documents: {
+        prompt: "private media prompt should not appear",
+      },
+      voice: {
+        provider: "elevenlabs",
+        voiceId: "voice_1",
+        sampleText: "private sample text should not appear",
+      },
+      profileImage: {
+        provider: "minimax",
+        prompt: "private image prompt should not appear",
+      },
+      assets: [
+        {
+          id: "asset_voice_1",
+          kind: "voice",
+          provider: "elevenlabs",
+          path: "/tmp/private-media-voice.mp3",
+        },
+      ],
+    });
+
+    try {
+      const cli = Bun.spawnSync({
+        cmd: ["bun", "src/cli.ts", "--store", storePath, "--json", "media", "status", identity.id],
+        cwd: rootDir,
+        env: { ...process.env, OPEN_IDENTITIES_AUDIT: auditPath },
+      });
+      expect(cli.exitCode).toBe(0);
+      const output = new TextDecoder().decode(cli.stdout);
+      const parsed = JSON.parse(output);
+      expect(parsed.identifier).toBe("open-identities:" + identity.id);
+      expect(output).not.toContain("123-45-6789");
+      expect(output).not.toContain("private media prompt should not appear");
+      expect(output).not.toContain("private sample text should not appear");
+      expect(output).not.toContain("private image prompt should not appear");
+      expect(output).not.toContain("/tmp/private-media-voice.mp3");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
