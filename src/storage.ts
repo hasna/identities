@@ -1,12 +1,45 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { addEmail, addPhone, createIdentity, identityToContactCard, normalizePersistedIdentity, updateIdentity } from "./core.js";
-import type { CreateIdentityInput, EmailAddress, Identity, IdentityContactCard, IdentityIdentifier, PhoneNumber, UpdateIdentityInput } from "./types.js";
+import { createBrowserPlanCoverageReport, listBrowserPlanProfiles } from "./browserplan.js";
+import {
+  addEmail,
+  addPhone,
+  assignMachine,
+  createIdentity,
+  identityHasMachineAssignment,
+  identityToContactCard,
+  normalizeMachineId,
+  normalizePersistedIdentity,
+  reserveBrowserPlanProfile,
+  updateIdentity,
+} from "./core.js";
+import type {
+  BrowserPlanCoverageOptions,
+  ListBrowserPlanProfilesOptions,
+} from "./browserplan.js";
+import type {
+  BrowserPlanCoverageReport,
+  BrowserPlanIdentityProfile,
+  BrowserPlanProfileReservationInput,
+  CreateIdentityInput,
+  EmailAddress,
+  Identity,
+  IdentityAssetInput,
+  IdentityContactCard,
+  IdentityIdentifier,
+  IdentityMachineAssignmentInput,
+  PhoneNumber,
+  UpdateIdentityInput,
+} from "./types.js";
 
 export interface IdentityStoreOptions {
   filePath?: string;
   auditPath?: string;
+}
+
+export interface ListByMachineOptions {
+  purpose?: string;
 }
 
 interface IdentityStoreFile {
@@ -42,6 +75,24 @@ export class IdentityStore {
 
   async listCards(): Promise<IdentityContactCard[]> {
     return (await this.list()).map(identityToContactCard);
+  }
+
+  async listByMachine(machineId: string, options: ListByMachineOptions = {}): Promise<Identity[]> {
+    const normalizedMachineId = normalizeMachineId(machineId);
+    return (await this.list()).filter((identity) => {
+      return identityHasMachineAssignment(identity, normalizedMachineId, options.purpose);
+    });
+  }
+
+  async listBrowserPlanProfilesByMachine(
+    machineId: string,
+    options: ListBrowserPlanProfilesOptions = {},
+  ): Promise<BrowserPlanIdentityProfile[]> {
+    return listBrowserPlanProfiles(await this.list(), machineId, options);
+  }
+
+  async getBrowserPlanCoverage(options: BrowserPlanCoverageOptions = {}): Promise<BrowserPlanCoverageReport> {
+    return createBrowserPlanCoverageReport(await this.list(), options);
   }
 
   async get(target: string): Promise<Identity | undefined> {
@@ -133,6 +184,39 @@ export class IdentityStore {
     });
   }
 
+  async assignMachine(target: string, assignment: IdentityMachineAssignmentInput): Promise<Identity> {
+    return this.withMutation(async () => {
+      const store = await this.readStore();
+      const index = store.identities.findIndex((identity) => matchesIdentity(identity, target));
+      if (index === -1) throw new Error(`Identity not found: ${target}`);
+
+      const updated = assignMachine(store.identities[index], assignment);
+      assertNoDuplicate(store.identities, updated, store.identities[index].id);
+      store.identities[index] = updated;
+      await this.writeStore(store);
+      await this.writeAuditEvent("assign-machine", updated.id);
+      return updated;
+    });
+  }
+
+  async reserveBrowserPlanProfile(
+    target: string,
+    reservation: BrowserPlanProfileReservationInput,
+  ): Promise<Identity> {
+    return this.withMutation(async () => {
+      const store = await this.readStore();
+      const index = store.identities.findIndex((identity) => matchesIdentity(identity, target));
+      if (index === -1) throw new Error(`Identity not found: ${target}`);
+
+      const updated = reserveBrowserPlanProfile(store.identities[index], reservation);
+      assertNoDuplicate(store.identities, updated, store.identities[index].id);
+      store.identities[index] = updated;
+      await this.writeStore(store);
+      await this.writeAuditEvent("reserve-browserplan-profile", updated.id);
+      return updated;
+    });
+  }
+
   private async readStore(): Promise<IdentityStoreFile> {
     try {
       const raw = await readFile(this.filePath, "utf8");
@@ -167,7 +251,13 @@ export class IdentityStore {
     const index = store.identities.findIndex((identity) => matchesIdentity(identity, target));
     if (index === -1) throw new Error(`Identity not found: ${target}`);
 
-    const updated = updateIdentity(store.identities[index], input);
+    const mergedAssets: IdentityAssetInput[] | undefined = input.assets
+      ? [...store.identities[index].assets, ...input.assets]
+      : undefined;
+    const updated = updateIdentity(store.identities[index], {
+      ...input,
+      assets: mergedAssets,
+    });
     assertNoDuplicate(store.identities, updated, store.identities[index].id);
     store.identities[index] = updated;
     await this.writeStore(store);
@@ -218,7 +308,9 @@ function assertNoDuplicate(identities: Identity[], identity: Identity, existingI
       identifierKey(candidate.uniqueIdentifier) === identifierKey(identity.uniqueIdentifier) ||
       candidate.identifiers.some((candidateIdentifier) => identity.identifiers.some((identifier) => identifierKey(candidateIdentifier) === identifierKey(identifier))) ||
       candidate.emails.some((candidateEmail) => identity.emails.some((email) => candidateEmail.address.toLowerCase() === email.address.toLowerCase())) ||
-      candidate.phones.some((candidatePhone) => identity.phones.some((phone) => candidatePhone.number === phone.number))
+      candidate.phones.some((candidatePhone) => identity.phones.some((phone) => candidatePhone.number === phone.number)) ||
+      hasDuplicateMachineSlot(candidate, identity) ||
+      hasDuplicateBrowserPlanProfile(candidate, identity)
     );
   });
 
@@ -229,6 +321,37 @@ function assertNoDuplicate(identities: Identity[], identity: Identity, existingI
 
 function identifierKey(identifier: IdentityIdentifier): string {
   return `${identifier.scheme}:${identifier.value}`;
+}
+
+function hasDuplicateMachineSlot(candidate: Identity, identity: Identity): boolean {
+  return (candidate.machineAssignments ?? []).some((candidateAssignment) => {
+    if (candidateAssignment.status === "released" || !candidateAssignment.slot) return false;
+    return (identity.machineAssignments ?? []).some((assignment) => {
+      if (assignment.status === "released" || !assignment.slot) return false;
+      return (
+        candidateAssignment.machineId === assignment.machineId &&
+        machineAssignmentPurpose(candidateAssignment) === machineAssignmentPurpose(assignment) &&
+        candidateAssignment.slot === assignment.slot
+      );
+    });
+  });
+}
+
+function hasDuplicateBrowserPlanProfile(candidate: Identity, identity: Identity): boolean {
+  return (candidate.browserPlanProfiles ?? []).some((candidateProfile) => {
+    if (candidateProfile.status === "released") return false;
+    return (identity.browserPlanProfiles ?? []).some((profile) => {
+      if (profile.status === "released") return false;
+      const sameMachine = candidateProfile.machineId === profile.machineId;
+      const sameEmail = candidateProfile.email.toLowerCase() === profile.email.toLowerCase();
+      const sameSlot = Boolean(candidateProfile.slot && profile.slot && candidateProfile.slot === profile.slot);
+      return sameMachine && (sameEmail || sameSlot);
+    });
+  });
+}
+
+function machineAssignmentPurpose(assignment: { purpose?: string }): string {
+  return assignment.purpose ?? "browserplan";
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

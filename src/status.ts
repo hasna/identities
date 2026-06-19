@@ -81,6 +81,8 @@ export interface IdentityReferenceStatus {
     channelRefs: number;
     scheduleRefs: number;
     subagentRefs: number;
+    machineAssignments: number;
+    browserPlanProfiles: number;
     documentSlots: number;
     populatedDocuments: number;
     maileryRefs: number;
@@ -131,6 +133,8 @@ export async function getIdentityReferenceStatus(store = new IdentityStore()): P
   let channelRefs = 0;
   let scheduleRefs = 0;
   let subagentRefs = 0;
+  let machineAssignments = 0;
+  let browserPlanProfiles = 0;
   let populatedDocuments = 0;
   let maileryRefs = 0;
   let telephonyRefs = 0;
@@ -146,6 +150,8 @@ export async function getIdentityReferenceStatus(store = new IdentityStore()): P
     phones += identity.phones.length;
     maileryRefs += identity.emails.filter((email) => Boolean(email.maileryId || email.sync?.provider === "mailery")).length;
     telephonyRefs += identity.phones.filter((phone) => Boolean(phone.telephonyId || phone.sync?.provider === "telephony")).length;
+    machineAssignments += identity.machineAssignments?.filter((assignment) => assignment.status !== "released").length ?? 0;
+    browserPlanProfiles += identity.browserPlanProfiles?.filter((profile) => profile.status !== "released").length ?? 0;
     populatedDocuments += populatedDocumentCount(identity);
     if (identity.agent) {
       agentProfiles += 1;
@@ -212,6 +218,8 @@ export async function getIdentityReferenceStatus(store = new IdentityStore()): P
       channelRefs,
       scheduleRefs,
       subagentRefs,
+      machineAssignments,
+      browserPlanProfiles,
       documentSlots: identities.length * identityDocumentKeys.length,
       populatedDocuments,
       maileryRefs,
@@ -292,7 +300,7 @@ export function projectIdentityMediaSummary(identity: Identity): {
     identifier: identityIdentifierToString(publicIdentityIdentifier(identity)),
     kind: identity.kind,
     name: identity.displayName ?? identity.fullName,
-    assets: identity.assets.length,
+    assets: identity.assets?.length ?? 0,
     hasVoice: Boolean(identity.voice),
     hasProfileImage: Boolean(identity.profileImage),
   };
@@ -334,11 +342,14 @@ function opaqueRef(value: string): string {
 }
 
 function packageVersion(): string {
-  try {
-    const path = join(dirname(fileURLToPath(import.meta.url)), "..", "package.json");
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as { version?: string };
-    return parsed.version ?? FALLBACK_PACKAGE_VERSION;
-  } catch {
-    return FALLBACK_PACKAGE_VERSION;
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  for (const relativePath of ["../package.json", "../../package.json"]) {
+    try {
+      const parsed = JSON.parse(readFileSync(join(currentDir, relativePath), "utf8")) as { version?: string };
+      if (parsed.version) return parsed.version;
+    } catch {
+      // Try the next packaged/source layout before falling back.
+    }
   }
+  return FALLBACK_PACKAGE_VERSION;
 }
