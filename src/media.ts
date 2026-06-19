@@ -638,7 +638,10 @@ async function writeGeneratedAsset(identity: Identity, input: {
   outDir?: string;
   metadata?: Record<string, unknown>;
 }): Promise<IdentityAsset> {
-  const dir = join(input.outDir ?? getIdentityMediaAssetsDir(), safePathSegment(identity.uniqueIdentifier.value || identity.id));
+  const dir = join(
+    input.outDir ?? getIdentityMediaAssetsDir(),
+    safePathSegment(identityIdentifierToString(publicIdentityIdentifier(identity))),
+  );
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const extension = extensionForMediaType(input.mediaType, input.kind);
   const path = join(dir, `${input.id}.${extension}`);
