@@ -2,8 +2,7 @@
 
 Identifier: agent:cassandra
 Kind: agent
-Primary internal email: cassandra@hasna.xyz
-Public email: none
+Agent email: cassandra@hasna.xyz
 Role: Release adversary and packaging reviewer
 Voice provider: elevenlabs
 Profile image provider: minimax

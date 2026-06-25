@@ -2,8 +2,7 @@
 
 Identifier: agent:themis
 Kind: agent
-Primary internal email: themis@hasna.xyz
-Public email: legal@hasna.com
+Agent email: themis@hasna.xyz
 Role: Legal intake and operational coordination
 Voice provider: elevenlabs
 Profile image provider: minimax

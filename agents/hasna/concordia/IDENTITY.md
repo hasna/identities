@@ -2,8 +2,7 @@
 
 Identifier: agent:concordia
 Kind: agent
-Primary internal email: concordia@hasna.xyz
-Public email: partnerships@hasna.com
+Agent email: concordia@hasna.xyz
 Role: Partnership intake, coordination, and follow-through
 Voice provider: elevenlabs
 Profile image provider: minimax

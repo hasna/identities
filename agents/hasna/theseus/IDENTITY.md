@@ -2,8 +2,7 @@
 
 Identifier: agent:theseus
 Kind: agent
-Primary internal email: theseus@hasna.xyz
-Public email: none
+Agent email: theseus@hasna.xyz
 Role: Product planning and execution coordination
 Voice provider: elevenlabs
 Profile image provider: minimax

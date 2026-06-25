@@ -2,8 +2,7 @@
 
 Identifier: agent:calliope
 Kind: agent
-Primary internal email: calliope@hasna.xyz
-Public email: marketing@hasna.com
+Agent email: calliope@hasna.xyz
 Role: Email marketing strategy and campaign operations
 Voice provider: elevenlabs
 Profile image provider: minimax

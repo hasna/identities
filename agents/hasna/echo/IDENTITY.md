@@ -2,8 +2,7 @@
 
 Identifier: agent:echo
 Kind: agent
-Primary internal email: echo@hasna.xyz
-Public email: social@hasna.com
+Agent email: echo@hasna.xyz
 Role: Social media planning, publishing, and response coordination
 Voice provider: elevenlabs
 Profile image provider: minimax

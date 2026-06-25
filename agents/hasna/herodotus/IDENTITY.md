@@ -2,8 +2,7 @@
 
 Identifier: agent:herodotus
 Kind: agent
-Primary internal email: herodotus@hasna.xyz
-Public email: none
+Agent email: herodotus@hasna.xyz
 Role: Market, customer, and competitor research
 Voice provider: elevenlabs
 Profile image provider: minimax

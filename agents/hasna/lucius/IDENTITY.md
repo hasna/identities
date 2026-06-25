@@ -2,8 +2,7 @@
 
 Identifier: agent:lucius
 Kind: agent
-Primary internal email: lucius@hasna.xyz
-Public email: sales@hasna.com
+Agent email: lucius@hasna.xyz
 Role: Sales development and inbound qualification
 Voice provider: elevenlabs
 Profile image provider: minimax

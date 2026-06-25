@@ -2,8 +2,7 @@
 
 Identifier: agent:mnemosyne
 Kind: agent
-Primary internal email: mnemosyne@hasna.xyz
-Public email: none
+Agent email: mnemosyne@hasna.xyz
 Role: CRM data hygiene and customer record coordination
 Voice provider: elevenlabs
 Profile image provider: minimax

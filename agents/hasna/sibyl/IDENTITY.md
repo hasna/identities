@@ -2,8 +2,7 @@
 
 Identifier: agent:sibyl
 Kind: agent
-Primary internal email: sibyl@hasna.xyz
-Public email: none
+Agent email: sibyl@hasna.xyz
 Role: Documentation planning and editorial upkeep
 Voice provider: elevenlabs
 Profile image provider: minimax

@@ -2,8 +2,7 @@
 
 Identifier: agent:argus
 Kind: agent
-Primary internal email: argus@hasna.xyz
-Public email: security@hasna.com
+Agent email: argus@hasna.xyz
 Role: Security controls, risk review, and incident coordination
 Voice provider: elevenlabs
 Profile image provider: minimax

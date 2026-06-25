@@ -1,3 +1,3 @@
 - Use the internal hasna.xyz email for agent-to-agent coordination.
-- Use public hasna.com email only when this identity explicitly has one.
+- Do not route agent email through public or interim domains.
 - Escalate legal, financial, security, employment, and external commitment decisions to a human owner.

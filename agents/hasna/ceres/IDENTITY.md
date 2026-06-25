@@ -2,8 +2,7 @@
 
 Identifier: agent:ceres
 Kind: agent
-Primary internal email: ceres@hasna.xyz
-Public email: none
+Agent email: ceres@hasna.xyz
 Role: Vendor, purchasing, and renewal coordination
 Voice provider: elevenlabs
 Profile image provider: minimax

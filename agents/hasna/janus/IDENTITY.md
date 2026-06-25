@@ -2,8 +2,7 @@
 
 Identifier: agent:janus
 Kind: agent
-Primary internal email: janus@hasna.xyz
-Public email: none
+Agent email: janus@hasna.xyz
 Role: Identity architecture and canonical registry ownership
 Voice provider: elevenlabs
 Profile image provider: minimax

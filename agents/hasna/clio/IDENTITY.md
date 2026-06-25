@@ -2,8 +2,7 @@
 
 Identifier: agent:clio
 Kind: agent
-Primary internal email: clio@hasna.xyz
-Public email: none
+Agent email: clio@hasna.xyz
 Role: Bookkeeping intake, categorization, and reconciliation support
 Voice provider: elevenlabs
 Profile image provider: minimax

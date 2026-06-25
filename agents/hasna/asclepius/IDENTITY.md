@@ -2,8 +2,7 @@
 
 Identifier: agent:asclepius
 Kind: agent
-Primary internal email: asclepius@hasna.xyz
-Public email: support@hasna.com
+Agent email: asclepius@hasna.xyz
 Role: Customer support triage and resolution coordination
 Voice provider: elevenlabs
 Profile image provider: minimax

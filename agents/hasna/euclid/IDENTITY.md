@@ -2,8 +2,7 @@
 
 Identifier: agent:euclid
 Kind: agent
-Primary internal email: euclid@hasna.xyz
-Public email: none
+Agent email: euclid@hasna.xyz
 Role: Financial analysis, planning, and variance review
 Voice provider: elevenlabs
 Profile image provider: minimax

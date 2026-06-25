@@ -19,8 +19,12 @@ identities --help
 identities create --kind agent --name "Ava Example" --identifier agent:ava-example --email ava@example.com --phone +15555550123
 identities list
 identities show agent:ava-example
-identities link-email agent:ava-example ava@hasna.com
+identities show agent:ava-example --verbose
+identities link-email agent:ava-example ava@hasna.xyz --verified --mailery-id mailery-address-id
 identities link-phone agent:ava-example +15555550199
+identities machine assign agent:ava-example machine001 --purpose browserplan --slot profile-01 --json
+identities browserplan reserve agent:ava-example --machine machine001 --slot profile-01 --json
+identities browserplan coverage --target 8 --json
 identities doc set agent:ava-example ethos "Protect user intent and identity data."
 identities agent manifest agent:ava-example --json
 identities agent seed-company --docs-dir agents/hasna --json
@@ -35,8 +39,20 @@ identities status --json
 ```
 
 Data is stored in `~/.hasna/identities/identities.json`.
-Use `OPEN_IDENTITIES_STORE=/path/to/identities.json` or `--store <path>` for isolated scripts and tests.
+Use `OPEN_IDENTITIES_STORE=/path/to/identities.json` or `--store <path>` for isolated scripts and tests. When `--store <path>` is used, the CLI writes audit events to `<path>.audit.jsonl` unless `--audit <path>` is provided.
 Generated media assets are stored in `~/.hasna/identities/assets` by default. Use `OPEN_IDENTITIES_ASSETS_DIR` or `--out-dir <dir>` to place generated audio and profile images somewhere else.
+
+CLI human output is compact by default so agent terminals do not ingest full
+identity records, document bodies, manifests, media objects, or coverage JSON
+unless explicitly requested. Use:
+
+- `--json` for stable machine-readable contracts and full exported objects
+- `--verbose` for full human-side object details
+- `--limit <n>` for longer human tables such as `list`, `machine list`,
+  `browserplan list`, `media status`, and `asset list`
+- detail commands such as `show <id> --verbose`, `doc get <id> <key>
+  --verbose`, and `agent manifest <id> --json` when a full record is actually
+  needed
 
 `identities status --json` is the public-safe machine contract for fleet
 integrations. It reports store path, audit path, environment override state,
@@ -59,7 +75,7 @@ The package includes a deterministic Hasna company-agent roster for vertical rol
 identities agent seed-company --docs-dir agents/hasna --json
 ```
 
-The seed command upserts the roster into the selected identity store, prunes deprecated non-classical identifiers by default, and exports per-agent markdown files. Every seeded agent uses an internal primary email in the form `<greek-or-roman-name>@hasna.xyz`, such as `calliope@hasna.xyz` for email marketing and `plutus@hasna.xyz` for accounting. Only externally facing roles receive secondary public `hasna.com` addresses, such as `marketing@hasna.com`, `sales@hasna.com`, `support@hasna.com`, and `security@hasna.com`.
+The seed command upserts the roster into the selected identity store, prunes deprecated non-classical identifiers by default, and exports per-agent markdown files. Every seeded agent uses exactly one canonical agent email in the form `<greek-or-roman-name>@hasna.xyz`, such as `calliope@hasna.xyz` for email marketing, `plutus@hasna.xyz` for accounting, and `marcus@hasna.xyz` for mail operations. Roster identities do not receive secondary public or interim-domain email addresses.
 
 Every seeded agent also receives planned media metadata:
 
@@ -157,6 +173,7 @@ Default contact cards, agent manifests, Eve exports, and sync payloads use a non
 The repo currently defines adapter contracts instead of hard-coding package dependencies. The adjacent email package is `open-emails`, published as `@hasna/mailery`, with a separate `@hasna/emails-sdk`. The phone package is `open-telephony`, published as `@hasna/telephony`.
 
 See [docs/integrations.md](docs/integrations.md) for the first sync contract.
+See [docs/browserplan.md](docs/browserplan.md) for the BrowserPlan machine, identity, email, and profile reservation contract.
 See [docs/media.md](docs/media.md) for voice and profile image generation.
 
 ## Vercel Eve

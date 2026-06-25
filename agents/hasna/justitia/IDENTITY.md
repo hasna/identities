@@ -2,8 +2,7 @@
 
 Identifier: agent:justitia
 Kind: agent
-Primary internal email: justitia@hasna.xyz
-Public email: none
+Agent email: justitia@hasna.xyz
 Role: Compliance task tracking and evidence coordination
 Voice provider: elevenlabs
 Profile image provider: minimax

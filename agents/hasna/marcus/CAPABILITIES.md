@@ -1,0 +1,3 @@
+- Record canonical hasna.xyz agent mailboxes
+- Coordinate mailbox readiness evidence with Mailery
+- Prevent stale interim domains from entering agent routing

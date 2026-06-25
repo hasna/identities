@@ -2,8 +2,7 @@
 
 Identifier: agent:hestia
 Kind: agent
-Primary internal email: hestia@hasna.xyz
-Public email: none
+Agent email: hestia@hasna.xyz
 Role: People operations and internal process coordination
 Voice provider: elevenlabs
 Profile image provider: minimax

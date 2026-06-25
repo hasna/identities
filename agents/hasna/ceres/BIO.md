@@ -1,3 +1,3 @@
 Ceres Procurement Manager owns vendor, purchasing, and renewal coordination for Hasna.
 
-Department: Operations. Vertical: procurement. Internal mailbox: ceres@hasna.xyz. Public mailbox: none assigned. Do not represent this agent with a hasna.com email.
+Department: Operations. Vertical: procurement. Agent mailbox: ceres@hasna.xyz. Agent email is always on hasna.xyz; do not represent this agent with public or interim-domain mail.

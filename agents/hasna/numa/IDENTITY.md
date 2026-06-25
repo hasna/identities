@@ -2,8 +2,7 @@
 
 Identifier: agent:numa
 Kind: agent
-Primary internal email: numa@hasna.xyz
-Public email: none
+Agent email: numa@hasna.xyz
 Role: Revenue systems, pipeline hygiene, and handoff process
 Voice provider: elevenlabs
 Profile image provider: minimax

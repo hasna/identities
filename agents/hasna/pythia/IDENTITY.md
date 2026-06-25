@@ -2,8 +2,7 @@
 
 Identifier: agent:pythia
 Kind: agent
-Primary internal email: pythia@hasna.xyz
-Public email: none
+Agent email: pythia@hasna.xyz
 Role: Business analytics and measurement support
 Voice provider: elevenlabs
 Profile image provider: minimax

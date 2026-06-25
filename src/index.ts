@@ -2,6 +2,7 @@ export {
   OPEN_IDENTITIES_SCHEME,
   addEmail,
   addPhone,
+  assignMachine,
   createDefaultDocuments,
   createIdentity,
   createOpenIdentityId,
@@ -10,20 +11,34 @@ export {
   identityToContactCard,
   identityIdentifierToString,
   identityToAgentManifest,
+  identityToBrowserPlanProfile,
   normalizeEmail,
+  normalizeBrowserPlanProfile,
+  normalizeBrowserPlanProfiles,
   normalizeIdentifier,
   normalizeIdentityAsset,
   normalizeIdentityAssets,
+  normalizeMachineAssignment,
+  normalizeMachineAssignments,
+  normalizeMachineId,
   normalizePersistedIdentity,
   normalizeProfileImage,
   normalizePhone,
   normalizeVoiceProfile,
   nowIso,
   publicIdentityIdentifier,
+  reserveBrowserPlanProfile,
   renderIdentityInstructions,
   updateIdentity,
 } from "./core.js";
 export { createIdentityStore, getIdentityDataDir, getIdentityStorePath, IdentityStore } from "./storage.js";
+export type { IdentityStoreOptions, ListByMachineOptions } from "./storage.js";
+export {
+  browserPlanDefaultMachineIds,
+  browserPlanExcludedMachineIds,
+  createBrowserPlanCoverageReport,
+  listBrowserPlanProfiles,
+} from "./browserplan.js";
 export { createAgentIdentityRef, createEcosystemRegistrationManifest } from "./ecosystem.js";
 export { listEveDocumentKeys, writeEveAgent } from "./eve.js";
 export { applyContactPointSyncResults, syncIdentityContactPoints, syncIdentityContactPointsAndUpdate } from "./integrations.js";
@@ -91,8 +106,18 @@ export type {
   IdentityStoreStatus,
 } from "./status.js";
 export type {
+  BrowserPlanCoverageOptions,
+  ListBrowserPlanProfilesOptions,
+} from "./browserplan.js";
+export type {
   AgentProfile,
   AgentRegistrationManifest,
+  BrowserPlanCoverageReport,
+  BrowserPlanIdentityProfile,
+  BrowserPlanMachineCoverage,
+  BrowserPlanProfileReservation,
+  BrowserPlanProfileReservationInput,
+  BrowserPlanProfileStatus,
   CreateIdentityInput,
   EmailAddress,
   Identity,
@@ -105,6 +130,9 @@ export type {
   IdentityDocumentSet,
   IdentityIdentifier,
   IdentityKind,
+  IdentityMachineAssignment,
+  IdentityMachineAssignmentInput,
+  IdentityMachineAssignmentStatus,
   IdentityMediaSource,
   PhoneNumber,
   ProfileImage,

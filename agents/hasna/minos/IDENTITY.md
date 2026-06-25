@@ -2,8 +2,7 @@
 
 Identifier: agent:minos
 Kind: agent
-Primary internal email: minos@hasna.xyz
-Public email: none
+Agent email: minos@hasna.xyz
 Role: Quality assurance, regression planning, and release checks
 Voice provider: elevenlabs
 Profile image provider: minimax

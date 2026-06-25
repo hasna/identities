@@ -2,8 +2,7 @@
 
 Identifier: agent:hephaestus
 Kind: agent
-Primary internal email: hephaestus@hasna.xyz
-Public email: none
+Agent email: hephaestus@hasna.xyz
 Role: Vercel Eve agent export engineer
 Voice provider: elevenlabs
 Profile image provider: minimax

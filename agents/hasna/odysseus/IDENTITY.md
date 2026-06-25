@@ -2,8 +2,7 @@
 
 Identifier: agent:odysseus
 Kind: agent
-Primary internal email: odysseus@hasna.xyz
-Public email: none
+Agent email: odysseus@hasna.xyz
 Role: Internal operations, cadence, and task orchestration
 Voice provider: elevenlabs
 Profile image provider: minimax

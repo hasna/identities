@@ -2,8 +2,7 @@
 
 Identifier: agent:aphrodite
 Kind: agent
-Primary internal email: aphrodite@hasna.xyz
-Public email: none
+Agent email: aphrodite@hasna.xyz
 Role: Brand system and messaging consistency
 Voice provider: elevenlabs
 Profile image provider: minimax

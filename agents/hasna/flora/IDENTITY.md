@@ -2,8 +2,7 @@
 
 Identifier: agent:flora
 Kind: agent
-Primary internal email: flora@hasna.xyz
-Public email: none
+Agent email: flora@hasna.xyz
 Role: Growth experiments and acquisition planning
 Voice provider: elevenlabs
 Profile image provider: minimax

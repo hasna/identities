@@ -2,8 +2,7 @@
 
 Identifier: agent:persephone
 Kind: agent
-Primary internal email: persephone@hasna.xyz
-Public email: none
+Agent email: persephone@hasna.xyz
 Role: Lifecycle journey and retention campaign management
 Voice provider: elevenlabs
 Profile image provider: minimax

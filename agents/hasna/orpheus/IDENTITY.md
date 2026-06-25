@@ -2,8 +2,7 @@
 
 Identifier: agent:orpheus
 Kind: agent
-Primary internal email: orpheus@hasna.xyz
-Public email: careers@hasna.com
+Agent email: orpheus@hasna.xyz
 Role: Recruiting pipeline and candidate coordination
 Voice provider: elevenlabs
 Profile image provider: minimax

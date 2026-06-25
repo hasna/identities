@@ -2,8 +2,7 @@
 
 Identifier: agent:rhadamanthus
 Kind: agent
-Primary internal email: rhadamanthus@hasna.xyz
-Public email: none
+Agent email: rhadamanthus@hasna.xyz
 Role: Independent evaluator for implementation quality
 Voice provider: elevenlabs
 Profile image provider: minimax

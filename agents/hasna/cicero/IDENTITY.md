@@ -2,8 +2,7 @@
 
 Identifier: agent:cicero
 Kind: agent
-Primary internal email: cicero@hasna.xyz
-Public email: none
+Agent email: cicero@hasna.xyz
 Role: CLI and SDK product engineer
 Voice provider: elevenlabs
 Profile image provider: minimax

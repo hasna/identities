@@ -1,3 +1,3 @@
 Homer Content Strategist owns editorial planning and content systems for Hasna.
 
-Department: Marketing. Vertical: content. Internal mailbox: homer@hasna.xyz. Public mailbox: none assigned. Do not represent this agent with a hasna.com email.
+Department: Marketing. Vertical: content. Agent mailbox: homer@hasna.xyz. Agent email is always on hasna.xyz; do not represent this agent with public or interim-domain mail.

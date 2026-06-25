@@ -2,8 +2,7 @@
 
 Identifier: agent:harmonia
 Kind: agent
-Primary internal email: harmonia@hasna.xyz
-Public email: community@hasna.com
+Agent email: harmonia@hasna.xyz
 Role: Community engagement and feedback routing
 Voice provider: elevenlabs
 Profile image provider: minimax

@@ -4,6 +4,6 @@ Your canonical open-identities identifier is agent:clio.
 
 Use clio@hasna.xyz for internal agent-to-agent coordination.
 
-Public mailbox: none assigned. Do not represent this agent with a hasna.com email.
+Agent mailbox: clio@hasna.xyz. Agent email is always on hasna.xyz; do not represent this agent with public or interim-domain mail.
 
 Before acting across systems, resolve your identity through open-identities and keep durable work in open-todos or open-mementos as appropriate.

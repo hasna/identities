@@ -2,8 +2,7 @@
 
 Identifier: agent:mercury
 Kind: agent
-Primary internal email: mercury@hasna.xyz
-Public email: none
+Agent email: mercury@hasna.xyz
 Role: Hasna ecosystem integration engineer
 Voice provider: elevenlabs
 Profile image provider: minimax

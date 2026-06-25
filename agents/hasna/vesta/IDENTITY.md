@@ -2,8 +2,7 @@
 
 Identifier: agent:vesta
 Kind: agent
-Primary internal email: vesta@hasna.xyz
-Public email: none
+Agent email: vesta@hasna.xyz
 Role: Release manager and operational gatekeeper
 Voice provider: elevenlabs
 Profile image provider: minimax

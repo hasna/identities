@@ -29,6 +29,45 @@ export type IdentityAssetStatus = "planned" | "generated" | "failed";
 
 export type IdentityMediaSource = "generated" | "imported" | "external";
 
+export type IdentityMachineAssignmentStatus = "assigned" | "reserved" | "released";
+
+export interface IdentityMachineAssignment {
+  machineId: string;
+  purpose?: string;
+  slot?: string;
+  status?: IdentityMachineAssignmentStatus;
+  assignedAt?: string;
+  releasedAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export type IdentityMachineAssignmentInput =
+  | string
+  | (Omit<IdentityMachineAssignment, "status" | "assignedAt"> &
+      Partial<Pick<IdentityMachineAssignment, "status" | "assignedAt">>);
+
+export type BrowserPlanProfileStatus = "reserved" | "active" | "released";
+
+export interface BrowserPlanProfileReservation {
+  id: string;
+  machineId: string;
+  profileName: string;
+  email: string;
+  slot?: string;
+  status: BrowserPlanProfileStatus;
+  reservedAt: string;
+  activatedAt?: string;
+  releasedAt?: string;
+  expiresAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export type BrowserPlanProfileReservationInput = Omit<
+  BrowserPlanProfileReservation,
+  "id" | "profileName" | "email" | "status" | "reservedAt"
+> &
+  Partial<Pick<BrowserPlanProfileReservation, "id" | "profileName" | "email" | "status" | "reservedAt">>;
+
 export interface IdentityAsset {
   id: string;
   kind: IdentityAssetKind;
@@ -132,6 +171,8 @@ export interface Identity {
   voice?: VoiceProfile;
   profileImage?: ProfileImage;
   assets: IdentityAsset[];
+  machineAssignments?: IdentityMachineAssignment[];
+  browserPlanProfiles?: BrowserPlanProfileReservation[];
   agent?: AgentProfile;
   traits: Record<string, unknown>;
   metadata: Record<string, unknown>;
@@ -164,6 +205,8 @@ export interface CreateIdentityInput {
   voice?: Partial<VoiceProfile>;
   profileImage?: Partial<ProfileImage>;
   assets?: IdentityAssetInput[];
+  machineAssignments?: IdentityMachineAssignmentInput[];
+  browserPlanProfiles?: BrowserPlanProfileReservationInput[];
   agent?: Partial<AgentProfile>;
   traits?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -183,9 +226,51 @@ export interface UpdateIdentityInput {
   voice?: Partial<VoiceProfile> | null;
   profileImage?: Partial<ProfileImage> | null;
   assets?: IdentityAssetInput[];
+  machineAssignments?: IdentityMachineAssignmentInput[];
+  browserPlanProfiles?: BrowserPlanProfileReservationInput[];
   agent?: Partial<AgentProfile>;
   traits?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+}
+
+export interface BrowserPlanIdentityProfile {
+  identityId: string;
+  identifier: string;
+  kind: IdentityKind;
+  fullName: string;
+  displayName?: string;
+  machineId: string;
+  profileName: string;
+  email: string;
+  emailVerified: boolean;
+  emailReady: boolean;
+  maileryId?: string;
+  reservationId: string;
+  reservationStatus: BrowserPlanProfileStatus;
+  slot?: string;
+}
+
+export interface BrowserPlanMachineCoverage {
+  machineId: string;
+  target: number;
+  assigned: number;
+  withEmail: number;
+  reserved: number;
+  ready: number;
+  usable: number;
+  missing: number;
+}
+
+export interface BrowserPlanCoverageReport {
+  targetPerMachine: number;
+  machines: BrowserPlanMachineCoverage[];
+  excludedMachineIds: string[];
+  totals: {
+    machines: number;
+    target: number;
+    usable: number;
+    missing: number;
+  };
 }
 
 export interface IdentityContactCard {

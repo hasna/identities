@@ -2,8 +2,7 @@
 
 Identifier: agent:phidias
 Kind: agent
-Primary internal email: phidias@hasna.xyz
-Public email: none
+Agent email: phidias@hasna.xyz
 Role: Product design and user experience coordination
 Voice provider: elevenlabs
 Profile image provider: minimax

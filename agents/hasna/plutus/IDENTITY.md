@@ -2,8 +2,7 @@
 
 Identifier: agent:plutus
 Kind: agent
-Primary internal email: plutus@hasna.xyz
-Public email: billing@hasna.com
+Agent email: plutus@hasna.xyz
 Role: Accounting controls, reporting, and close support
 Voice provider: elevenlabs
 Profile image provider: minimax

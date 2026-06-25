@@ -2,8 +2,7 @@
 
 Identifier: agent:aurelius
 Kind: agent
-Primary internal email: aurelius@hasna.xyz
-Public email: none
+Agent email: aurelius@hasna.xyz
 Role: Engineering planning and delivery coordination
 Voice provider: elevenlabs
 Profile image provider: minimax

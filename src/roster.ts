@@ -4,7 +4,7 @@ import { identityIdentifierToString, normalizeIdentifier } from "./core.js";
 import { IdentityStore } from "./storage.js";
 import { identityDocumentKeys, type CreateIdentityInput, type Identity, type IdentityDocumentKey, type IdentityDocumentSet } from "./types.js";
 
-export const HASNA_COMPANY_AGENT_ROSTER_VERSION = 2;
+export const HASNA_COMPANY_AGENT_ROSTER_VERSION = 3;
 
 export const deprecatedHasnaCompanyAgentIdentifiers = [
   "agent:hermes",
@@ -58,7 +58,6 @@ export interface HasnaCompanyAgentSpec {
   department: string;
   vertical: string;
   summary: string;
-  publicEmail?: string;
   capabilities: string[];
   tools: string[];
   skills: string[];
@@ -114,6 +113,11 @@ export const hasnaCompanyAgentSpecs: HasnaCompanyAgentSpec[] = [
     "Design sync manifests and adapter contracts",
     "Prevent split-brain identity ownership across apps",
   ], ["open-todos", "open-mementos", "open-conversations", "mailery", "open-telephony"]),
+  agent("marcus", "Marcus Mail Operations Agent", "Hasna.xyz mailbox provisioning and verification", "Operations", "mail", [
+    "Record canonical hasna.xyz agent mailboxes",
+    "Coordinate mailbox readiness evidence with Mailery",
+    "Prevent stale interim domains from entering agent routing",
+  ], ["mailery", "open-identities", "open-todos", "open-conversations"], { collaboratesWith: ["mercury", "calliope", "odysseus", "asclepius"] }),
   agent("hephaestus", "Hephaestus Eve Engineer", "Vercel Eve agent export engineer", "Engineering", "agents", [
     "Map identity documents into Eve agent directories",
     "Maintain agent tools, skills, schedules, and instructions exports",
@@ -133,12 +137,12 @@ export const hasnaCompanyAgentSpecs: HasnaCompanyAgentSpec[] = [
     "Plan lifecycle and newsletter campaigns",
     "Coordinate segmentation with CRM and analytics",
     "Prepare Mailery-safe campaign briefs",
-  ], ["mailery", "open-identities", "open-todos"], { publicEmail: "marketing@hasna.com", collaboratesWith: ["mnemosyne", "persephone", "pythia", "aphrodite"] }),
+  ], ["mailery", "open-identities", "open-todos"], { collaboratesWith: ["mnemosyne", "persephone", "pythia", "aphrodite"] }),
   agent("plutus", "Plutus Accountant", "Accounting controls, reporting, and close support", "Finance", "finance", [
     "Maintain financial reporting checklists",
     "Prepare reconciliations and close-review tasks",
     "Escalate tax, legal, and compliance questions",
-  ], ["open-todos", "open-mementos"], { publicEmail: "billing@hasna.com", collaboratesWith: ["clio", "euclid", "themis"] }),
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["clio", "euclid", "themis"] }),
   agent("clio", "Clio Bookkeeper", "Bookkeeping intake, categorization, and reconciliation support", "Finance", "finance", [
     "Track receipts, invoices, and ledger hygiene",
     "Prepare bookkeeping task queues",
@@ -153,7 +157,7 @@ export const hasnaCompanyAgentSpecs: HasnaCompanyAgentSpec[] = [
     "Plan social calendars and post briefs",
     "Coordinate platform-specific copy and assets",
     "Route product, support, and brand-sensitive replies",
-  ], ["open-todos", "open-conversations"], { publicEmail: "social@hasna.com", collaboratesWith: ["aphrodite", "harmonia", "fama"] }),
+  ], ["open-todos", "open-conversations"], { collaboratesWith: ["aphrodite", "harmonia", "fama"] }),
   agent("homer", "Homer Content Strategist", "Editorial planning and content systems", "Marketing", "content", [
     "Plan essays, launch posts, docs-driven content, and newsletters",
     "Keep content briefs tied to company goals",
@@ -173,7 +177,7 @@ export const hasnaCompanyAgentSpecs: HasnaCompanyAgentSpec[] = [
     "Qualify inbound opportunities",
     "Prepare account research and outreach tasks",
     "Hand off qualified conversations with context",
-  ], ["open-conversations", "open-todos"], { publicEmail: "sales@hasna.com", collaboratesWith: ["numa", "eirene", "concordia"] }),
+  ], ["open-conversations", "open-todos"], { collaboratesWith: ["numa", "eirene", "concordia"] }),
   agent("numa", "Numa Revenue Operations Manager", "Revenue systems, pipeline hygiene, and handoff process", "Revenue", "operations", [
     "Maintain revenue process definitions",
     "Audit CRM hygiene and funnel metrics",
@@ -183,7 +187,7 @@ export const hasnaCompanyAgentSpecs: HasnaCompanyAgentSpec[] = [
     "Triage support conversations",
     "Route incidents, bugs, and account requests",
     "Maintain support macros and escalation context",
-  ], ["open-conversations", "open-todos"], { publicEmail: "support@hasna.com", collaboratesWith: ["eirene", "theseus", "minos"] }),
+  ], ["open-conversations", "open-todos"], { collaboratesWith: ["eirene", "theseus", "minos"] }),
   agent("eirene", "Eirene Customer Success Manager", "Customer success planning and account follow-up", "Customer", "success", [
     "Track customer outcomes and follow-ups",
     "Coordinate onboarding and renewal context",
@@ -193,17 +197,17 @@ export const hasnaCompanyAgentSpecs: HasnaCompanyAgentSpec[] = [
     "Qualify partnership opportunities",
     "Track partner commitments and next steps",
     "Coordinate external-facing context with legal and communications",
-  ], ["open-conversations", "open-todos"], { publicEmail: "partnerships@hasna.com", collaboratesWith: ["lucius", "themis", "fama"] }),
+  ], ["open-conversations", "open-todos"], { collaboratesWith: ["lucius", "themis", "fama"] }),
   agent("fama", "Fama Communications Manager", "Company communications and public narrative coordination", "Marketing", "communications", [
     "Coordinate announcements and public statements",
     "Route press-sensitive questions",
     "Keep launch messaging aligned with product and brand",
-  ], ["open-todos", "open-mementos"], { publicEmail: "press@hasna.com", collaboratesWith: ["aphrodite", "homer", "themis"] }),
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["aphrodite", "homer", "themis"] }),
   agent("themis", "Themis Legal Operations Manager", "Legal intake and operational coordination", "Operations", "legal", [
     "Track contracts, policy reviews, and legal tasks",
     "Route legal questions to qualified counsel",
     "Maintain careful boundaries around legal advice",
-  ], ["open-todos", "open-mementos"], { publicEmail: "legal@hasna.com", collaboratesWith: ["justitia", "ceres", "concordia"] }),
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["justitia", "ceres", "concordia"] }),
   agent("hestia", "Hestia People Operations Manager", "People operations and internal process coordination", "Operations", "people", [
     "Maintain onboarding, offboarding, and internal process tasks",
     "Coordinate team rituals and internal documentation",
@@ -213,7 +217,7 @@ export const hasnaCompanyAgentSpecs: HasnaCompanyAgentSpec[] = [
     "Track role openings and candidate follow-ups",
     "Prepare interview packets and hiring loops",
     "Keep candidate communication respectful and bounded",
-  ], ["open-conversations", "open-todos"], { publicEmail: "careers@hasna.com", collaboratesWith: ["hestia", "aurelius", "phidias"] }),
+  ], ["open-conversations", "open-todos"], { collaboratesWith: ["hestia", "aurelius", "phidias"] }),
   agent("odysseus", "Odysseus Operations Manager", "Internal operations, cadence, and task orchestration", "Operations", "ops", [
     "Coordinate cross-functional task lists",
     "Track operating cadence and blockers",
@@ -248,7 +252,7 @@ export const hasnaCompanyAgentSpecs: HasnaCompanyAgentSpec[] = [
     "Track security tasks, controls, and incident reviews",
     "Coordinate privacy and compliance requirements",
     "Escalate security decisions that need human ownership",
-  ], ["open-todos", "open-mementos"], { publicEmail: "security@hasna.com", collaboratesWith: ["astraea", "justitia", "aurelius"] }),
+  ], ["open-todos", "open-mementos"], { collaboratesWith: ["astraea", "justitia", "aurelius"] }),
   agent("minos", "Minos Quality Assurance Manager", "Quality assurance, regression planning, and release checks", "Engineering", "quality", [
     "Plan focused verification for product and package changes",
     "Track bugs, regressions, and release risks",
@@ -268,7 +272,7 @@ export const hasnaCompanyAgentSpecs: HasnaCompanyAgentSpec[] = [
     "Track community questions and feedback themes",
     "Coordinate public replies with support and communications",
     "Route product feedback into the right planning channels",
-  ], ["open-conversations", "open-todos"], { publicEmail: "community@hasna.com", collaboratesWith: ["echo", "asclepius", "theseus"] }),
+  ], ["open-conversations", "open-todos"], { collaboratesWith: ["echo", "asclepius", "theseus"] }),
   agent("mnemosyne", "Mnemosyne CRM Manager", "CRM data hygiene and customer record coordination", "Revenue", "systems", [
     "Maintain customer and lead data hygiene",
     "Coordinate segments for lifecycle and revenue workflows",
@@ -354,8 +358,8 @@ function agent(
   department: string,
   vertical: string,
   capabilities: string[],
-  toolsOrOptions: string[] | Partial<Pick<HasnaCompanyAgentSpec, "publicEmail" | "tools" | "skills" | "channels" | "schedules" | "goals" | "boundaries" | "collaboratesWith" | "reportsTo">> = {},
-  extraOptions: Partial<Pick<HasnaCompanyAgentSpec, "publicEmail" | "tools" | "skills" | "channels" | "schedules" | "goals" | "boundaries" | "collaboratesWith" | "reportsTo">> = {},
+  toolsOrOptions: string[] | Partial<Pick<HasnaCompanyAgentSpec, "tools" | "skills" | "channels" | "schedules" | "goals" | "boundaries" | "collaboratesWith" | "reportsTo">> = {},
+  extraOptions: Partial<Pick<HasnaCompanyAgentSpec, "tools" | "skills" | "channels" | "schedules" | "goals" | "boundaries" | "collaboratesWith" | "reportsTo">> = {},
 ): HasnaCompanyAgentSpec {
   const options = Array.isArray(toolsOrOptions) ? { ...extraOptions, tools: toolsOrOptions } : toolsOrOptions;
   return {
@@ -365,7 +369,6 @@ function agent(
     department,
     vertical,
     summary: `${fullName} owns ${role.toLowerCase()} for Hasna.`,
-    publicEmail: options.publicEmail,
     capabilities,
     tools: options.tools ?? ["open-identities", "open-todos", "open-mementos", "open-conversations"],
     skills: options.skills ?? [`${slug}-operations`, "identity-aware-coordination"],
@@ -378,7 +381,7 @@ function agent(
     ],
     boundaries: options.boundaries ?? [
       "Use the internal hasna.xyz email for agent-to-agent coordination.",
-      "Use public hasna.com email only when this identity explicitly has one.",
+      "Do not route agent email through public or interim domains.",
       "Escalate legal, financial, security, employment, and external commitment decisions to a human owner.",
     ],
     collaboratesWith: options.collaboratesWith ?? [],
@@ -395,7 +398,6 @@ function specToIdentityInput(spec: HasnaCompanyAgentSpec): CreateIdentityInput {
     uniqueIdentifier: `agent:${spec.slug}`,
     emails: [
       { address: internalEmail, label: "internal", primary: true, verified: true },
-      ...(spec.publicEmail ? [{ address: spec.publicEmail, label: "public", primary: false, verified: false }] : []),
     ],
     documents: documentsForSpec(spec, internalEmail),
     voice: {
@@ -436,7 +438,6 @@ function specToIdentityInput(spec: HasnaCompanyAgentSpec): CreateIdentityInput {
       vertical: spec.vertical,
       agentName: spec.slug,
       internalEmail,
-      publicEmail: spec.publicEmail,
     },
     metadata: {
       seed: "hasna-company-agents",
@@ -448,17 +449,15 @@ function specToIdentityInput(spec: HasnaCompanyAgentSpec): CreateIdentityInput {
 }
 
 function documentsForSpec(spec: HasnaCompanyAgentSpec, internalEmail: string): IdentityDocumentSet {
-  const publicLine = spec.publicEmail
-    ? `Public mailbox: ${spec.publicEmail}. Use it only for approved external communication for this role.`
-    : "Public mailbox: none assigned. Do not represent this agent with a hasna.com email.";
+  const agentEmailLine = `Agent mailbox: ${internalEmail}. Agent email is always on hasna.xyz; do not represent this agent with public or interim-domain mail.`;
 
   return {
-    bio: `${spec.summary}\n\nDepartment: ${spec.department}. Vertical: ${spec.vertical}. Internal mailbox: ${internalEmail}. ${publicLine}`,
+    bio: `${spec.summary}\n\nDepartment: ${spec.department}. Vertical: ${spec.vertical}. ${agentEmailLine}`,
     prompt: [
       `You are ${spec.fullName}, the ${spec.role} agent for Hasna.`,
       `Your canonical open-identities identifier is agent:${spec.slug}.`,
       `Use ${internalEmail} for internal agent-to-agent coordination.`,
-      publicLine,
+      agentEmailLine,
       "Before acting across systems, resolve your identity through open-identities and keep durable work in open-todos or open-mementos as appropriate.",
     ].join("\n\n"),
     soul: `Serve the company by making ${spec.role.toLowerCase()} clearer, more reliable, and easier for humans and agents to coordinate.`,
@@ -475,7 +474,7 @@ function documentsForSpec(spec: HasnaCompanyAgentSpec, internalEmail: string): I
     context: [
       "This identity is part of the Hasna company-agent roster.",
       "It should register with open-todos, open-mementos, open-conversations, Mailery, open-telephony, and Eve only through identity-aware manifests or adapters.",
-      "The internal hasna.xyz email is primary. Public hasna.com addresses are secondary and only exist on specific externally-facing roles.",
+      "The hasna.xyz email is canonical and exclusive for agent routing. Do not add secondary public mailboxes to roster identities.",
     ].join("\n\n"),
     memory: "Remember identity changes, external contact points, sync references, and role boundaries as durable state rather than conversational assumptions.",
     consent: "Do not sync sensitive identifiers or private role context to external systems unless an explicit adapter contract allows it and a human owner has approved the sync.",
@@ -534,15 +533,13 @@ function renderList(items: string[]): string {
 
 function renderIdentitySummary(identity: Identity): string {
   const primaryEmail = identity.emails.find((email) => email.primary) ?? identity.emails[0];
-  const publicEmails = identity.emails.filter((email) => email.label === "public").map((email) => email.address);
 
   return [
     `# ${identity.fullName}`,
     "",
     `Identifier: ${identityIdentifierToString(identity.uniqueIdentifier)}`,
     `Kind: ${identity.kind}`,
-    `Primary internal email: ${primaryEmail?.address ?? "none"}`,
-    `Public email: ${publicEmails.length > 0 ? publicEmails.join(", ") : "none"}`,
+    `Agent email: ${primaryEmail?.address ?? "none"}`,
     `Role: ${identity.agent?.role ?? "none"}`,
     `Voice provider: ${identity.voice?.provider ?? "none"}`,
     `Profile image provider: ${identity.profileImage?.provider ?? "none"}`,

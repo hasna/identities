@@ -2,8 +2,7 @@
 
 Identifier: agent:penelope
 Kind: agent
-Primary internal email: penelope@hasna.xyz
-Public email: none
+Agent email: penelope@hasna.xyz
 Role: Executive coordination, scheduling, and follow-through
 Voice provider: elevenlabs
 Profile image provider: minimax

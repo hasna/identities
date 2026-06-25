@@ -2,8 +2,7 @@
 
 Identifier: agent:astraea
 Kind: agent
-Primary internal email: astraea@hasna.xyz
-Public email: none
+Agent email: astraea@hasna.xyz
 Role: Privacy, consent, and data minimization auditor
 Voice provider: elevenlabs
 Profile image provider: minimax

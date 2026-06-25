@@ -2,8 +2,7 @@
 
 Identifier: agent:archimedes
 Kind: agent
-Primary internal email: archimedes@hasna.xyz
-Public email: none
+Agent email: archimedes@hasna.xyz
 Role: Storage, validation, and migration engineer
 Voice provider: elevenlabs
 Profile image provider: minimax

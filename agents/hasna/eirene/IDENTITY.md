@@ -2,8 +2,7 @@
 
 Identifier: agent:eirene
 Kind: agent
-Primary internal email: eirene@hasna.xyz
-Public email: none
+Agent email: eirene@hasna.xyz
 Role: Customer success planning and account follow-up
 Voice provider: elevenlabs
 Profile image provider: minimax

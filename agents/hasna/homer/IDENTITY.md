@@ -2,8 +2,7 @@
 
 Identifier: agent:homer
 Kind: agent
-Primary internal email: homer@hasna.xyz
-Public email: none
+Agent email: homer@hasna.xyz
 Role: Editorial planning and content systems
 Voice provider: elevenlabs
 Profile image provider: minimax

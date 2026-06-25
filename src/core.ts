@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 import type {
   AgentProfile,
   AgentRegistrationManifest,
+  BrowserPlanIdentityProfile,
+  BrowserPlanProfileReservation,
+  BrowserPlanProfileReservationInput,
   CreateIdentityInput,
   EmailAddress,
   Identity,
@@ -10,6 +13,8 @@ import type {
   IdentityContactCard,
   IdentityDocumentSet,
   IdentityIdentifier,
+  IdentityMachineAssignment,
+  IdentityMachineAssignmentInput,
   PhoneNumber,
   ProfileImage,
   UpdateIdentityInput,
@@ -19,6 +24,7 @@ import { identityDocumentKeys } from "./types.js";
 
 export const OPEN_IDENTITIES_SCHEME = "open-identities";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MACHINE_ID_PATTERN = /^[a-z][a-z0-9-]*[a-z0-9]$/;
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -105,6 +111,11 @@ export function createIdentity(input: CreateIdentityInput): Identity {
   const emails = ensureSinglePrimary((input.emails ?? []).map(normalizeEmail));
   const phones = ensureSinglePrimary((input.phones ?? []).map(normalizePhone));
   const fullName = requiredTrimmed(input.fullName, "fullName");
+  const machineAssignments = normalizeMachineAssignments(input.machineAssignments);
+  const browserPlanProfiles = normalizeBrowserPlanProfiles(input.browserPlanProfiles, emails, {
+    defaultProfileName: input.displayName?.trim() || fullName,
+  });
+  assertBrowserPlanProfilesHaveAssignments(machineAssignments, browserPlanProfiles);
 
   return {
     id,
@@ -119,6 +130,8 @@ export function createIdentity(input: CreateIdentityInput): Identity {
     voice: input.voice ? normalizeVoiceProfile(input.voice) : undefined,
     profileImage: input.profileImage ? normalizeProfileImage(input.profileImage) : undefined,
     assets: normalizeIdentityAssets(input.assets),
+    machineAssignments,
+    browserPlanProfiles,
     agent: input.kind === "agent" ? normalizeAgentProfile(input.agent) : input.agent ? normalizeAgentProfile(input.agent) : undefined,
     traits: input.traits ?? {},
     metadata: input.metadata ?? {},
@@ -132,6 +145,18 @@ export function updateIdentity(identity: Identity, input: UpdateIdentityInput): 
   const identifiers = input.identifiers
     ? dedupeIdentifiers([uniqueIdentifier, ...input.identifiers.map(normalizeIdentifier)])
     : dedupeIdentifiers([uniqueIdentifier, ...identity.identifiers]);
+  const emails = input.emails ? ensureSinglePrimary(input.emails.map(normalizeEmail)) : identity.emails;
+  const machineAssignments = input.machineAssignments
+    ? normalizeMachineAssignments(input.machineAssignments)
+    : normalizeMachineAssignments(identity.machineAssignments ?? []);
+  const browserPlanProfiles = input.browserPlanProfiles
+    ? normalizeBrowserPlanProfiles(input.browserPlanProfiles, emails, {
+        defaultProfileName: input.displayName?.trim() ?? identity.displayName ?? input.fullName?.trim() ?? identity.fullName,
+      })
+    : normalizeBrowserPlanProfiles(identity.browserPlanProfiles ?? [], emails, {
+        defaultProfileName: input.displayName?.trim() ?? identity.displayName ?? input.fullName?.trim() ?? identity.fullName,
+      });
+  assertBrowserPlanProfilesHaveAssignments(machineAssignments, browserPlanProfiles);
 
   return {
     ...identity,
@@ -140,7 +165,7 @@ export function updateIdentity(identity: Identity, input: UpdateIdentityInput): 
     displayName: input.displayName?.trim() ?? identity.displayName,
     uniqueIdentifier,
     identifiers,
-    emails: input.emails ? ensureSinglePrimary(input.emails.map(normalizeEmail)) : identity.emails,
+    emails,
     phones: input.phones ? ensureSinglePrimary(input.phones.map(normalizePhone)) : identity.phones,
     documents: input.documents ? { ...identity.documents, ...input.documents } : identity.documents,
     voice:
@@ -152,6 +177,8 @@ export function updateIdentity(identity: Identity, input: UpdateIdentityInput): 
           ? normalizeProfileImage(input.profileImage, identity.profileImage)
           : identity.profileImage,
     assets: input.assets ? normalizeIdentityAssets(input.assets) : normalizeIdentityAssets(identity.assets ?? []),
+    machineAssignments,
+    browserPlanProfiles,
     agent: input.agent ? normalizeAgentProfile(input.agent, identity.agent) : identity.agent,
     traits: input.traits ? { ...identity.traits, ...input.traits } : identity.traits,
     metadata: input.metadata ? { ...identity.metadata, ...input.metadata } : identity.metadata,
@@ -162,6 +189,12 @@ export function updateIdentity(identity: Identity, input: UpdateIdentityInput): 
 export function normalizePersistedIdentity(identity: Identity): Identity {
   const timestamp = identity.createdAt ?? nowIso();
   const uniqueIdentifier = normalizeIdentifier(identity.uniqueIdentifier);
+  const emails = ensureSinglePrimary((identity.emails ?? []).map(normalizeEmail));
+  const machineAssignments = normalizeMachineAssignments(identity.machineAssignments ?? []);
+  const browserPlanProfiles = normalizeBrowserPlanProfiles(identity.browserPlanProfiles ?? [], emails, {
+    defaultProfileName: identity.displayName ?? identity.fullName,
+  });
+  assertBrowserPlanProfilesHaveAssignments(machineAssignments, browserPlanProfiles);
   return {
     ...identity,
     id: identity.id,
@@ -170,12 +203,14 @@ export function normalizePersistedIdentity(identity: Identity): Identity {
     displayName: identity.displayName?.trim(),
     uniqueIdentifier,
     identifiers: dedupeIdentifiers([uniqueIdentifier, ...(identity.identifiers ?? []).map(normalizeIdentifier)]),
-    emails: ensureSinglePrimary((identity.emails ?? []).map(normalizeEmail)),
+    emails,
     phones: ensureSinglePrimary((identity.phones ?? []).map(normalizePhone)),
     documents: { ...createDefaultDocuments(), ...(identity.documents ?? {}) },
     voice: identity.voice ? normalizeVoiceProfile(identity.voice) : undefined,
     profileImage: identity.profileImage ? normalizeProfileImage(identity.profileImage) : undefined,
     assets: normalizeIdentityAssets(identity.assets ?? []),
+    machineAssignments,
+    browserPlanProfiles,
     agent: identity.agent ? normalizeAgentProfile(identity.agent) : undefined,
     traits: identity.traits ?? {},
     metadata: identity.metadata ?? {},
@@ -196,6 +231,92 @@ export function addPhone(identity: Identity, phone: PhoneNumber | string): Ident
   const withoutExisting = identity.phones.filter((item) => item.number !== nextPhone.number);
   const nextPhones = ensureSinglePrimary([...withoutExisting, nextPhone]);
   return updateIdentity(identity, { phones: nextPhones });
+}
+
+export function assignMachine(identity: Identity, assignment: IdentityMachineAssignmentInput): Identity {
+  const nextAssignment = normalizeMachineAssignment(assignment);
+  const assignments = normalizeMachineAssignments([
+    ...(identity.machineAssignments ?? []).filter((item) => machineAssignmentKey(item) !== machineAssignmentKey(nextAssignment)),
+    nextAssignment,
+  ]);
+  return updateIdentity(identity, { machineAssignments: assignments });
+}
+
+export function reserveBrowserPlanProfile(
+  identity: Identity,
+  reservation: BrowserPlanProfileReservationInput,
+): Identity {
+  const nextReservation = normalizeBrowserPlanProfile(reservation, identity.emails, {
+    defaultProfileName: identity.displayName ?? identity.fullName,
+  });
+  const hasAssignment = (identity.machineAssignments ?? []).some((assignment) => {
+    return (
+      assignment.machineId === nextReservation.machineId &&
+      assignment.status !== "released" &&
+      (!assignment.purpose || assignment.purpose === "browserplan")
+    );
+  });
+  if (!hasAssignment) {
+    throw new Error(`Identity is not assigned to BrowserPlan machine: ${nextReservation.machineId}`);
+  }
+
+  const reservations = normalizeBrowserPlanProfiles([
+    ...(identity.browserPlanProfiles ?? []).filter((item) => !matchesBrowserPlanProfileReservation(item, nextReservation)),
+    nextReservation,
+  ], identity.emails, { defaultProfileName: identity.displayName ?? identity.fullName });
+  return updateIdentity(identity, { browserPlanProfiles: reservations });
+}
+
+export function listIdentityMachineAssignments(identity: Identity, machineId?: string): IdentityMachineAssignment[] {
+  const normalizedMachineId = machineId ? normalizeMachineId(machineId) : undefined;
+  return (identity.machineAssignments ?? []).filter((assignment) => {
+    return assignment.status !== "released" && (!normalizedMachineId || assignment.machineId === normalizedMachineId);
+  });
+}
+
+export function identityHasMachineAssignment(identity: Identity, machineId: string, purpose?: string): boolean {
+  const normalizedMachineId = normalizeMachineId(machineId);
+  const normalizedPurpose = purpose?.trim().toLowerCase();
+  return (identity.machineAssignments ?? []).some((assignment) => {
+    return (
+      assignment.machineId === normalizedMachineId &&
+      assignment.status !== "released" &&
+      (normalizedPurpose === undefined || assignmentPurposeKey(assignment) === normalizedPurpose)
+    );
+  });
+}
+
+export function identityToBrowserPlanProfile(
+  identity: Identity,
+  reservation: BrowserPlanProfileReservation,
+): BrowserPlanIdentityProfile {
+  const email = findEmail(identity, reservation.email);
+  if (!email) throw new Error(`BrowserPlan reservation email is not attached to identity: ${reservation.email}`);
+  return {
+    identityId: identity.id,
+    identifier: identityIdentifierToString(publicIdentityIdentifier(identity)),
+    kind: identity.kind,
+    fullName: identity.fullName,
+    displayName: identity.displayName,
+    machineId: reservation.machineId,
+    profileName: reservation.profileName,
+    email: email.address,
+    emailVerified: email.verified ?? false,
+    emailReady: isBrowserPlanEmailReady(email),
+    maileryId: email.maileryId ?? email.sync?.externalId,
+    reservationId: reservation.id,
+    reservationStatus: reservation.status,
+    slot: reservation.slot,
+  };
+}
+
+export function listBrowserPlanProfilesForIdentity(identity: Identity, machineId?: string): BrowserPlanIdentityProfile[] {
+  const normalizedMachineId = machineId ? normalizeMachineId(machineId) : undefined;
+  return (identity.browserPlanProfiles ?? [])
+    .filter((reservation) => {
+      return reservation.status !== "released" && (!normalizedMachineId || reservation.machineId === normalizedMachineId);
+    })
+    .map((reservation) => identityToBrowserPlanProfile(identity, reservation));
 }
 
 export function findPrimaryEmail(identity: Identity): EmailAddress | undefined {
@@ -364,6 +485,106 @@ export function normalizeIdentityAssets(assets: IdentityAssetInput[] | undefined
   return normalized;
 }
 
+export function normalizeMachineId(machineId: string): string {
+  const normalized = requiredTrimmed(machineId, "machineId").toLowerCase();
+  if (!MACHINE_ID_PATTERN.test(normalized)) throw new Error(`Invalid machineId: ${machineId}`);
+  return normalized;
+}
+
+export function normalizeMachineAssignment(input: IdentityMachineAssignmentInput): IdentityMachineAssignment {
+  const assignment = typeof input === "string" ? { machineId: input } : input;
+  const status = assignment.status ?? "assigned";
+  if (!isMachineAssignmentStatus(status)) throw new Error(`Invalid machine assignment status: ${status}`);
+  return {
+    ...assignment,
+    machineId: normalizeMachineId(assignment.machineId),
+    purpose: trimmedOptional(assignment.purpose)?.toLowerCase(),
+    slot: trimmedOptional(assignment.slot),
+    status,
+    assignedAt: assignment.assignedAt ?? nowIso(),
+    releasedAt: trimmedOptional(assignment.releasedAt),
+    metadata: assignment.metadata ?? {},
+  };
+}
+
+export function normalizeMachineAssignments(
+  assignments: IdentityMachineAssignmentInput[] | undefined,
+): IdentityMachineAssignment[] {
+  const seen = new Set<string>();
+  const normalized: IdentityMachineAssignment[] = [];
+  for (const assignment of assignments ?? []) {
+    const next = normalizeMachineAssignment(assignment);
+    const key = machineAssignmentKey(next);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(next);
+  }
+  return normalized;
+}
+
+export function normalizeBrowserPlanProfile(
+  input: BrowserPlanProfileReservationInput,
+  emails: Array<EmailAddress | string>,
+  options: { defaultProfileName: string },
+): BrowserPlanProfileReservation {
+  const normalizedEmails = emails.map(normalizeEmail);
+  const email = input.email ? normalizeEmailAddress(input.email) : findPrimaryNormalizedEmail(normalizedEmails)?.address;
+  if (!email) throw new Error("BrowserPlan profile requires an email address");
+  if (!normalizedEmails.some((candidate) => candidate.address === email)) {
+    throw new Error(`BrowserPlan profile email is not attached to identity: ${email}`);
+  }
+  const status = input.status ?? "reserved";
+  if (!isBrowserPlanProfileStatus(status)) throw new Error(`Invalid BrowserPlan profile status: ${status}`);
+  const profileName = requiredTrimmed(input.profileName ?? options.defaultProfileName, "profileName");
+  return {
+    ...input,
+    id: input.id?.trim() || `browserplan_${randomUUID()}`,
+    machineId: normalizeMachineId(input.machineId),
+    profileName,
+    email,
+    slot: trimmedOptional(input.slot),
+    status,
+    reservedAt: input.reservedAt ?? nowIso(),
+    activatedAt: trimmedOptional(input.activatedAt),
+    releasedAt: trimmedOptional(input.releasedAt),
+    expiresAt: trimmedOptional(input.expiresAt),
+    metadata: input.metadata ?? {},
+  };
+}
+
+export function normalizeBrowserPlanProfiles(
+  profiles: BrowserPlanProfileReservationInput[] | undefined,
+  emails: Array<EmailAddress | string>,
+  options: { defaultProfileName: string },
+): BrowserPlanProfileReservation[] {
+  const seen = new Set<string>();
+  const seenMachineEmail = new Set<string>();
+  const seenMachineSlot = new Set<string>();
+  const normalized: BrowserPlanProfileReservation[] = [];
+  for (const profile of profiles ?? []) {
+    const next = normalizeBrowserPlanProfile(profile, emails, options);
+    const key = browserPlanProfileKey(next);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (next.status !== "released") {
+      const emailKey = `${next.machineId}:${next.email}`;
+      if (seenMachineEmail.has(emailKey)) {
+        throw new Error(`Duplicate BrowserPlan profile email for machine: ${next.machineId}`);
+      }
+      seenMachineEmail.add(emailKey);
+      if (next.slot) {
+        const slotKey = `${next.machineId}:${next.slot}`;
+        if (seenMachineSlot.has(slotKey)) {
+          throw new Error(`Duplicate BrowserPlan profile slot for machine: ${next.machineId}`);
+        }
+        seenMachineSlot.add(slotKey);
+      }
+    }
+    normalized.push(next);
+  }
+  return normalized;
+}
+
 export function normalizeVoiceProfile(input: Partial<VoiceProfile>, existing?: VoiceProfile): VoiceProfile {
   const provider = input.provider ?? existing?.provider;
   if (!provider) throw new Error("voice provider cannot be empty");
@@ -412,6 +633,71 @@ function normalizeAgentProfile(input: Partial<AgentProfile> | undefined, existin
     subagents: normalizeStringList(input?.subagents ?? existing?.subagents),
     identityProvider: input?.identityProvider ?? existing?.identityProvider,
   };
+}
+
+function findEmail(identity: Identity, address: string): EmailAddress | undefined {
+  const normalized = normalizeEmailAddress(address);
+  return identity.emails.find((email) => email.address === normalized);
+}
+
+function findPrimaryNormalizedEmail(emails: EmailAddress[]): EmailAddress | undefined {
+  return emails.find((email) => email.primary) ?? emails[0];
+}
+
+function isBrowserPlanEmailReady(email: EmailAddress): boolean {
+  return Boolean(
+    email.verified &&
+      (email.maileryId || (email.sync?.provider === "mailery" && email.sync.status === "synced" && email.sync.externalId)),
+  );
+}
+
+function machineAssignmentKey(assignment: Pick<IdentityMachineAssignment, "machineId" | "purpose" | "slot">): string {
+  return [assignment.machineId, assignment.purpose ?? "", assignment.slot ?? ""].join(":");
+}
+
+function browserPlanProfileKey(profile: Pick<BrowserPlanProfileReservation, "machineId" | "email" | "slot">): string {
+  return [profile.machineId, profile.slot ?? "", profile.email].join(":");
+}
+
+function matchesBrowserPlanProfileReservation(
+  current: BrowserPlanProfileReservation,
+  next: BrowserPlanProfileReservation,
+): boolean {
+  if (current.id === next.id) return true;
+  if (current.machineId !== next.machineId) return false;
+  if (current.email === next.email) return true;
+  return Boolean(current.slot && next.slot && current.slot === next.slot);
+}
+
+function assertBrowserPlanProfilesHaveAssignments(
+  assignments: IdentityMachineAssignment[],
+  profiles: BrowserPlanProfileReservation[],
+): void {
+  for (const profile of profiles) {
+    if (profile.status === "released") continue;
+    const hasAssignment = assignments.some((assignment) => {
+      return (
+        assignment.machineId === profile.machineId &&
+        assignment.status !== "released" &&
+        assignmentPurposeKey(assignment) === "browserplan"
+      );
+    });
+    if (!hasAssignment) {
+      throw new Error(`BrowserPlan profile requires machine assignment: ${profile.machineId}`);
+    }
+  }
+}
+
+function assignmentPurposeKey(assignment: Pick<IdentityMachineAssignment, "purpose">): string {
+  return assignment.purpose ?? "browserplan";
+}
+
+function isMachineAssignmentStatus(value: string): value is NonNullable<IdentityMachineAssignment["status"]> {
+  return value === "assigned" || value === "reserved" || value === "released";
+}
+
+function isBrowserPlanProfileStatus(value: string): value is BrowserPlanProfileReservation["status"] {
+  return value === "reserved" || value === "active" || value === "released";
 }
 
 function normalizeStringList(values: string[] | undefined): string[] {

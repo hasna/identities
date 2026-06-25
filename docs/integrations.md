@@ -29,6 +29,13 @@ configured and roughly populated. That contract returns metadata and counts, not
 identity records. It intentionally omits contact values, document bodies, media
 asset paths, credential values, and sensitive identifiers.
 
+Human CLI output is intentionally compact by default. Agent workflows should use
+the default human output for orientation, add `--limit <n>` when they need more
+rows, and switch to `--json` only when they need the stable machine-readable
+contract. Full object details are available through `--verbose` or explicit
+detail paths such as `show <id> --verbose`, `doc get <id> <key> --verbose`, and
+`agent manifest <id> --json`.
+
 ## Mailery
 
 The local email repo is `open-emails`. Its package is currently `@hasna/mailery`, and it also includes `@hasna/emails-sdk`.
@@ -60,10 +67,21 @@ The local `open-connectors` repository includes ElevenLabs and MiniMax connector
 
 Generated media should be stored as `assets` references with checksums and provider metadata. Do not copy audio or image bytes into identity JSON, Mailery, Telephony, Eve, Todos, Mementos, or Conversations unless a specific adapter contract requires that transfer.
 
+## BrowserPlan
+
+BrowserPlan profiles need a machine, identity, and email address. `open-identities`
+owns the identity-to-machine assignment and BrowserPlan profile reservation.
+`open-machines` owns canonical machine ids, routeability, and fleet install
+eligibility. Mailery owns address readiness and mailbox operations.
+
+See [browserplan.md](browserplan.md) for the SDK and CLI contract.
+
 ## Conflict Rules
 
 - `open-identities` is the source of truth for full name, kind, unique identifier, and identity documents.
+- `open-identities` is the source of truth for BrowserPlan identity/profile reservations.
 - Mailery is the source of truth for email operational state.
+- `open-machines` is the source of truth for machine reachability and fleet membership.
 - Telephony is the source of truth for phone operational state.
 - ElevenLabs and MiniMax are generation providers, not identity stores.
 - Sync should be idempotent and keyed by `identityId` plus normalized email address or phone number.
