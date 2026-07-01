@@ -235,6 +235,7 @@ identities instructions import ./instructions.json --json
 identities instructions sources --json
 identities instructions sources --canonical --provider codewith --json
 identities instructions export --canonical --provider codewith --json
+identities instructions export --canonical --provider opencode --json
 ```
 
 `instructions list` includes store-level global/provider sources, explicit
@@ -242,13 +243,17 @@ identity sources, and derived sources from populated identity documents such as
 `prompt`, `personality`, `ethos`, and `voice`. The production export contract is
 `{ version: 1, package: "@hasna/identities", exportedAt, sources, validation,
 metadata }`; downstream renderers should reject exports where
-`validation.valid` is false.
+`validation.valid` is false. Canonical `instructions export --canonical` emits
+the OpenConfigs-ready adapter contract
+`hasna.identities.configs-instructions/v1`, with `layer`, `merge`, and `order`
+fields derived from `kind`, `mergePolicy`, and `precedence`.
 
 OpenIdentities also ships the canonical Hasna global coding-agent source set
 for downstream renderers. It contains one global system prompt, one
 non-overridable global rules source, and provider overlays for Codewith, Claude
-Code, and Codex. OpenConfigs should consume these sources and render managed
-provider blocks; it remains responsible for file rendering and merge mechanics.
+Code, Codex, and OpenCode. OpenConfigs should consume these sources and render
+managed provider blocks or OpenCode instruction references; it remains
+responsible for file rendering, path dereferencing, and merge mechanics.
 
 The canonical set includes rules for Knowledge CLI/SDK usage, Todos plans and
 evidence, Mementos/Conversations/Projects source-of-truth boundaries,
@@ -260,10 +265,16 @@ and Hasna package release-age registry hygiene.
 SDK consumers can import the same data from `@hasna/identities`:
 
 ```ts
-import { createGlobalAgentInstructionSourceExport } from "@hasna/identities";
+import {
+  createGlobalAgentConfigsInstructionSourceExport,
+  createGlobalAgentInstructionSourceExport,
+} from "@hasna/identities";
 
-const exportForCodewith = createGlobalAgentInstructionSourceExport({
+const rawExportForCodewith = createGlobalAgentInstructionSourceExport({
   providers: ["codewith"],
+});
+const openConfigsExportForOpenCode = createGlobalAgentConfigsInstructionSourceExport({
+  providers: ["opencode"],
 });
 ```
 

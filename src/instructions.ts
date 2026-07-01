@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import type {
+  ConfigsInstructionLayer,
+  ConfigsInstructionSource,
+  ConfigsInstructionSourceExport,
   Identity,
   IdentityDocumentKey,
   InstructionMergePolicy,
@@ -40,6 +43,8 @@ export const instructionSourceKindPrecedence: Record<InstructionSourceKind, numb
   "project-overlay": 700,
   "session-overlay": 800,
 };
+
+export const configsInstructionExportContract = "hasna.identities.configs-instructions/v1" as const;
 
 export const instructionSourceSchema = {
   version: 1,
@@ -363,6 +368,30 @@ export function createInstructionSourceExport(
   };
 }
 
+export function createConfigsInstructionSourceExport(
+  sources: Array<InstructionSourceInput | InstructionSource>,
+  metadata: Record<string, unknown> = {},
+): ConfigsInstructionSourceExport {
+  const normalized = normalizeInstructionSources(sources);
+  return {
+    contract: configsInstructionExportContract,
+    version: 1,
+    package: "@hasna/identities",
+    exportedAt: nowInstructionIso(),
+    sources: normalized.map(toConfigsInstructionSource),
+    validation: validateInstructionSources(normalized),
+    metadata: {
+      ...metadata,
+      compatibility: "open-configs",
+      mapping: {
+        layer: "derived from kind",
+        merge: "copied from mergePolicy",
+        order: "copied from precedence",
+      },
+    },
+  };
+}
+
 export function projectInstructionSourcePaths(sources: InstructionSource[]): Array<{
   sourceId: string;
   kind: InstructionSourceKind;
@@ -495,6 +524,46 @@ function defaultOwnerKind(kind: InstructionSourceKind): InstructionSourceOwnerKi
   if (kind === "project-overlay") return "project";
   if (kind === "session-overlay") return "session";
   return "global";
+}
+
+function toConfigsInstructionSource(source: InstructionSource): ConfigsInstructionSource {
+  const layer = instructionKindToConfigsLayer(source.kind);
+  return {
+    id: source.id,
+    label: source.title,
+    layer,
+    merge: source.mergePolicy,
+    order: source.precedence,
+    content: source.content,
+    targetProviders: source.targetProviders,
+    owner: source.owner,
+    sourcePaths: source.sourcePaths,
+    globs: source.globs,
+    hash: source.hash,
+    nonOverridable: source.nonOverridable,
+    replacementScope: source.replacementScope,
+    rules: [],
+    provenance: source.provenance,
+    metadata: {
+      ...source.metadata,
+      instructionKind: source.kind,
+      instructionMergePolicy: source.mergePolicy,
+      instructionPrecedence: source.precedence,
+      providerCompatibility: source.providerCompatibility,
+      safety: source.safety,
+      sensitivity: source.sensitivity,
+      ruleIds: source.ruleIds,
+    },
+  };
+}
+
+export function instructionKindToConfigsLayer(kind: InstructionSourceKind): ConfigsInstructionLayer {
+  if (kind === "global-rules" || kind === "global-system-prompt") return "global";
+  if (kind === "provider-rules" || kind === "provider-system-prompt") return "tool";
+  if (kind === "account-overlay") return "account";
+  if (kind === "identity-doc" || kind === "persona-doc") return "agent";
+  if (kind === "project-overlay") return "project";
+  return "local";
 }
 
 function instructionKindForDocument(key: IdentityDocumentKey): InstructionSourceKind {

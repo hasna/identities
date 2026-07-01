@@ -2,8 +2,9 @@
 
 ## 0.1.5
 
-- Added the canonical Hasna global coding-agent system prompt, non-overridable rules, and provider overlays for Codewith, Claude Code, and Codex.
+- Added the canonical Hasna global coding-agent system prompt, non-overridable rules, and provider overlays for Codewith, Claude Code, Codex, and OpenCode.
 - Exposed canonical global agent instruction sources through the SDK and `identities instructions sources/export --canonical`.
+- Added the `hasna.identities.configs-instructions/v1` canonical export adapter for OpenConfigs, including `layer`, `merge`, and `order` compatibility fields.
 
 ## 0.1.4
 

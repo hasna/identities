@@ -34,7 +34,7 @@ import {
   validateInstructionSources,
 } from "./instructions.js";
 import {
-  createGlobalAgentInstructionSourceExport,
+  createGlobalAgentConfigsInstructionSourceExport,
   globalAgentInstructionSourceSet,
   listGlobalAgentInstructionSources,
 } from "./global-agent-rules.js";
@@ -579,7 +579,7 @@ async function dispatchInstructions(rest: string[], parsed: ParsedArgs, store: I
   if (subcommand === "export") {
     const identityTarget = flagValue(parsed, "identity");
     const exported = hasFlag(parsed, "canonical")
-      ? createGlobalAgentInstructionSourceExport({ providers: canonicalProviderFlags(parsed) })
+      ? createGlobalAgentConfigsInstructionSourceExport({ providers: canonicalProviderFlags(parsed) })
       : createInstructionSourceExport(await store.listInstructionSources({ identityTarget }), {
         identityTarget,
         store: store.filePath,

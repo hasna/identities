@@ -43,9 +43,12 @@ export { createAgentIdentityRef, createEcosystemRegistrationManifest } from "./e
 export { listEveDocumentKeys, writeEveAgent } from "./eve.js";
 export { applyContactPointSyncResults, syncIdentityContactPoints, syncIdentityContactPointsAndUpdate } from "./integrations.js";
 export {
+  configsInstructionExportContract,
+  createConfigsInstructionSourceExport,
   createIdentityDocumentInstructionSources,
   createInstructionSourceExport,
   hashInstructionContent,
+  instructionKindToConfigsLayer,
   instructionSourceKindPrecedence,
   instructionSourceSchema,
   listIdentityInstructionSources,
@@ -56,6 +59,7 @@ export {
   validateInstructionSources,
 } from "./instructions.js";
 export {
+  createGlobalAgentConfigsInstructionSourceExport,
   createGlobalAgentInstructionSourceExport,
   globalAgentInstructionProviders,
   globalAgentInstructionSourceInputs,
@@ -134,6 +138,10 @@ export type {
   GlobalAgentInstructionSourceOptions,
 } from "./global-agent-rules.js";
 export type {
+  ConfigsInstructionLayer,
+  ConfigsInstructionRule,
+  ConfigsInstructionSource,
+  ConfigsInstructionSourceExport,
   AgentProfile,
   AgentRegistrationManifest,
   BrowserPlanCoverageReport,

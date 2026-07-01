@@ -48,7 +48,7 @@ Non-overridable safety sources fail closed:
 `InstructionSourceValidationResult`. Consumers must reject exports with
 `valid: false`.
 
-## Export Contract
+## Raw Export Contract
 
 ```json
 {
@@ -71,6 +71,54 @@ Renderers should use `hash` and `effectiveHash` for manifests and should keep
 provider artifacts derived. The editable source path, owner ref, and provenance
 point back to OpenIdentities as the source of truth.
 
+## OpenConfigs Export Contract
+
+OpenConfigs consumes the adapter contract emitted by canonical exports:
+
+```json
+{
+  "contract": "hasna.identities.configs-instructions/v1",
+  "version": 1,
+  "package": "@hasna/identities",
+  "exportedAt": "2026-07-01T00:00:00.000Z",
+  "sources": [
+    {
+      "id": "hasna-codewith-global-agent-overlay",
+      "label": "Codewith Global Agent Overlay",
+      "layer": "tool",
+      "merge": "append",
+      "order": 200,
+      "content": "# Codewith Provider Overlay\n...",
+      "targetProviders": ["codewith"],
+      "rules": []
+    }
+  ],
+  "validation": {
+    "valid": true,
+    "sourceCount": 1,
+    "issues": [],
+    "effectiveHash": "sha256:...",
+    "nonOverridableSafetyRules": []
+  },
+  "metadata": {}
+}
+```
+
+The compatibility mapping is deterministic:
+
+- `global-rules` and `global-system-prompt` map to `layer: "global"`.
+- `provider-rules` and `provider-system-prompt` map to `layer: "tool"`.
+- identity and persona documents map to `layer: "agent"`.
+- account, project, machine, and session overlays map to their closest
+  OpenConfigs layer: `account`, `project`, or `local`.
+- `merge` copies `mergePolicy`; `order` copies `precedence`.
+
+The adapter preserves `sourcePaths`, `globs`, hashes, provenance, owner refs,
+metadata, and provider compatibility metadata. Source-path-only and
+rule-path-only entries remain valid OpenIdentities sources; renderers that do
+not yet dereference paths may emit empty inline content while preserving the
+path metadata for their own follow-up resolution.
+
 ## Canonical Global Agent Rules
 
 OpenIdentities publishes the Hasna global coding-agent instruction source set
@@ -82,6 +130,7 @@ provider files or managed blocks in their own layer.
 identities instructions sources --canonical --json
 identities instructions sources --canonical --provider codewith --json
 identities instructions export --canonical --provider claude --json
+identities instructions export --canonical --provider opencode --json
 ```
 
 The canonical set includes:
@@ -91,6 +140,7 @@ The canonical set includes:
 - `hasna-codewith-global-agent-overlay`
 - `hasna-claude-global-agent-overlay`
 - `hasna-codex-global-agent-overlay`
+- `hasna-opencode-global-agent-overlay`
 
 Provider filtering keeps the global prompt and global rules, then includes only
 matching provider overlays. For example, `--provider codewith` returns the two
@@ -120,10 +170,12 @@ SDK consumers can use:
 
 ```ts
 import {
+  createGlobalAgentConfigsInstructionSourceExport,
   createGlobalAgentInstructionSourceExport,
   listGlobalAgentInstructionSources,
 } from "@hasna/identities";
 
 const sources = listGlobalAgentInstructionSources({ providers: ["codewith"] });
-const exportPayload = createGlobalAgentInstructionSourceExport({ providers: ["codewith"] });
+const rawExportPayload = createGlobalAgentInstructionSourceExport({ providers: ["codewith"] });
+const openConfigsExportPayload = createGlobalAgentConfigsInstructionSourceExport({ providers: ["opencode"] });
 ```

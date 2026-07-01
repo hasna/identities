@@ -1,8 +1,10 @@
 import {
+  createConfigsInstructionSourceExport,
   createInstructionSourceExport,
   normalizeInstructionSources,
 } from "./instructions.js";
 import type {
+  ConfigsInstructionSourceExport,
   InstructionProviderCompatibility,
   InstructionSource,
   InstructionSourceExport,
@@ -15,7 +17,7 @@ export const globalAgentInstructionSourceSet = {
   title: "Hasna Global Coding Agent Rules Standard",
 } as const;
 
-export const globalAgentInstructionProviders = ["generic", "codewith", "claude", "codex"] as const;
+export const globalAgentInstructionProviders = ["generic", "codewith", "claude", "codex", "opencode"] as const;
 
 export type GlobalAgentInstructionProvider = (typeof globalAgentInstructionProviders)[number];
 
@@ -63,6 +65,13 @@ const globalProviderCompatibility: InstructionProviderCompatibility[] = [
     nativePaths: ["AGENTS.md", "~/.codex/AGENTS.md"],
     notes: "OpenConfigs should render this as a managed Codex instruction block.",
   },
+  {
+    provider: "opencode",
+    supported: true,
+    strategy: "import",
+    nativePaths: ["opencode.json", "~/.config/opencode/opencode.json"],
+    notes: "OpenConfigs should render this as OpenCode instruction references in opencode.json pointing at managed fragments.",
+  },
 ];
 
 const codewithCompatibility: InstructionProviderCompatibility[] = [{
@@ -87,6 +96,14 @@ const codexCompatibility: InstructionProviderCompatibility[] = [{
   strategy: "managed-block",
   nativePaths: ["AGENTS.md", "~/.codex/AGENTS.md"],
   notes: "Provider overlay for Codex instruction files.",
+}];
+
+const opencodeCompatibility: InstructionProviderCompatibility[] = [{
+  provider: "opencode",
+  supported: true,
+  strategy: "import",
+  nativePaths: ["opencode.json", "~/.config/opencode/opencode.json"],
+  notes: "Provider overlay for OpenCode opencode.json instruction references.",
 }];
 
 export const globalAgentInstructionSourceInputs: InstructionSourceInput[] = [
@@ -262,6 +279,37 @@ export const globalAgentInstructionSourceInputs: InstructionSourceInput[] = [
       provider: "codex",
     },
   },
+  {
+    id: "hasna-opencode-global-agent-overlay",
+    kind: "provider-rules",
+    title: "OpenCode Global Agent Overlay",
+    content: lines([
+      "# OpenCode Provider Overlay",
+      "",
+      "Render this source through the OpenCode provider adapter as managed instruction references in opencode.json, with fragment files owned by the renderer. Preserve user and project OpenCode configuration outside the managed section.",
+      "",
+      "Use Todos CLI tasks and plans as the source of truth for OpenCode work, evidence, commits, and review state. Do not treat a shell, terminal, or tmux pane as the work queue.",
+      "",
+      "When OpenCode provider routing, profile selection, or instruction rendering fails, repair the owning CLI, SDK, or workflow path and record evidence instead of bypassing the failure with manual prompt paste.",
+    ]),
+    owner: { kind: "provider", id: "opencode", name: "OpenCode" },
+    sensitivity: "internal",
+    mergePolicy: "append",
+    safety: "safety",
+    ruleIds: [
+      "provider:opencode:managed-instruction-references",
+      "provider:opencode:todos-source",
+      "provider:opencode:no-manual-paste-fallback",
+    ],
+    targetProviders: ["opencode"],
+    providerCompatibility: opencodeCompatibility,
+    provenance,
+    metadata: {
+      ...sourceSetMetadata,
+      role: "provider-overlay",
+      provider: "opencode",
+    },
+  },
 ];
 
 export function listGlobalAgentInstructionSources(
@@ -279,6 +327,16 @@ export function createGlobalAgentInstructionSourceExport(
 ): InstructionSourceExport {
   const sources = listGlobalAgentInstructionSources(options);
   return createInstructionSourceExport(sources, {
+    ...sourceSetMetadata,
+    requestedProviders: [...normalizeProviderFilter(options.providers)].sort(),
+  });
+}
+
+export function createGlobalAgentConfigsInstructionSourceExport(
+  options: GlobalAgentInstructionSourceOptions = {},
+): ConfigsInstructionSourceExport {
+  const sources = listGlobalAgentInstructionSources(options);
+  return createConfigsInstructionSourceExport(sources, {
     ...sourceSetMetadata,
     requestedProviders: [...normalizeProviderFilter(options.providers)].sort(),
   });

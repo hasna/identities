@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
+  configsInstructionExportContract,
   createHasnaCompanyAgentInputs,
   createBrowserPlanCoverageReport,
+  createGlobalAgentConfigsInstructionSourceExport,
   createGlobalAgentInstructionSourceExport,
   createInstructionSourceExport,
   createIdentity,
@@ -653,6 +655,7 @@ describe("open-identities", () => {
       "hasna-claude-global-agent-overlay",
       "hasna-codewith-global-agent-overlay",
       "hasna-codex-global-agent-overlay",
+      "hasna-opencode-global-agent-overlay",
     ]);
 
     const validation = validateInstructionSources(sources);
@@ -679,11 +682,27 @@ describe("open-identities", () => {
     expect(combined).toContain("Co-Authored-By");
     expect(combined).toContain("Bun");
     expect(combined).toContain("release-age");
+    expect(combined).toContain("OpenCode Provider Overlay");
 
     const codewithSources = listGlobalAgentInstructionSources({ providers: ["codewith"] });
     expect(codewithSources.some((source) => source.id === "hasna-codewith-global-agent-overlay")).toBe(true);
     expect(codewithSources.some((source) => source.id === "hasna-claude-global-agent-overlay")).toBe(false);
+    expect(codewithSources.some((source) => source.id === "hasna-opencode-global-agent-overlay")).toBe(false);
     expect(codewithSources.some((source) => source.owner.kind === "global")).toBe(true);
+
+    const opencodeSources = listGlobalAgentInstructionSources({ providers: ["opencode"] });
+    expect(opencodeSources.map((source) => source.id)).toEqual([
+      "hasna-global-coding-agent-non-overridable-rules",
+      "hasna-global-coding-agent-system-prompt",
+      "hasna-opencode-global-agent-overlay",
+    ]);
+    expect(opencodeSources[2].providerCompatibility).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        provider: "opencode",
+        strategy: "import",
+        nativePaths: expect.arrayContaining(["opencode.json", "~/.config/opencode/opencode.json"]),
+      }),
+    ]));
 
     const exported = createGlobalAgentInstructionSourceExport({ providers: ["codewith"] });
     expect(exported.validation.valid).toBe(true);
@@ -691,6 +710,16 @@ describe("open-identities", () => {
       sourceSet: globalAgentInstructionSourceSet.id,
       sourceSetVersion: globalAgentInstructionSourceSet.version,
     });
+
+    const configsExport = createGlobalAgentConfigsInstructionSourceExport({ providers: ["opencode"] });
+    expect(configsExport.contract).toBe(configsInstructionExportContract);
+    expect(openConfigsContractSmoke(configsExport, "opencode").map((source) => source.id)).toEqual([
+      "hasna-global-coding-agent-non-overridable-rules",
+      "hasna-global-coding-agent-system-prompt",
+      "hasna-opencode-global-agent-overlay",
+    ]);
+    expect(configsExport.sources[0]).toMatchObject({ layer: "global", merge: "append", order: 100 });
+    expect(configsExport.sources[2]).toMatchObject({ layer: "tool", merge: "append", order: 200 });
   });
 
   test("CLI exposes instruction source list, paths, show, set, validate, export, import, and sources", async () => {
@@ -871,8 +900,10 @@ describe("open-identities", () => {
     const canonicalExport = JSON.parse(await captureStdout(async () => {
       await runCli(["--json", "--store", storePath, "instructions", "export", "--canonical", "--provider", "codewith"]);
     }));
+    expect(canonicalExport.contract).toBe(configsInstructionExportContract);
     expect(canonicalExport.sources.map((source: { id: string }) => source.id)).toEqual(canonicalSources.sources.map((source: { id: string }) => source.id));
     expect(canonicalExport.metadata).toMatchObject({ sourceSet: globalAgentInstructionSourceSet.id });
+    expect(openConfigsContractSmoke(canonicalExport, "codewith")).toHaveLength(3);
 
     await captureStdout(async () => {
       await runCli(["--json", "--store", storePath, "instructions", "export", exportPath]);
@@ -1404,4 +1435,45 @@ async function captureStderrAndExitCode(fn: () => Promise<void>): Promise<{ stde
     console.error = original;
     process.exitCode = originalExitCode ?? 0;
   }
+}
+
+function openConfigsContractSmoke(value: unknown, tool: "codewith" | "claude" | "codex" | "opencode"): Array<{ id: string }> {
+  const record = requireTestRecord(value, "identity instruction export");
+  if (record.contract !== configsInstructionExportContract) {
+    throw new Error("Unsupported identity instruction export contract.");
+  }
+  const validation = optionalTestRecord(record.validation);
+  if (validation?.valid === false) throw new Error("Identity instruction export is invalid.");
+  if (!Array.isArray(record.sources)) throw new Error("Identity instruction export sources must be an array.");
+
+  return record.sources
+    .map((item, index) => {
+      const source = requireTestRecord(item, "identity instruction source");
+      const targetProviders = Array.isArray(source.targetProviders)
+        ? source.targetProviders.filter((provider): provider is string => typeof provider === "string")
+        : [];
+      if (targetProviders.length > 0 && !targetProviders.includes(tool)) return null;
+      if (!isConfigsLayer(source.layer)) throw new Error(`Invalid session instruction layer: ${String(source.layer)}`);
+      if (source.merge !== "append" && source.merge !== "replace") {
+        throw new Error(`Invalid session instruction merge policy: ${String(source.merge)}`);
+      }
+      if (typeof source.id !== "string" || !source.id.trim()) throw new Error("Invalid identity instruction source id.");
+      if (typeof source.order !== "number") throw new Error(`Invalid instruction order at index ${index}.`);
+      return { id: source.id };
+    })
+    .filter((source): source is { id: string } => source !== null);
+}
+
+function requireTestRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid ${label}.`);
+  return value as Record<string, unknown>;
+}
+
+function optionalTestRecord(value: unknown): Record<string, unknown> | null {
+  if (value === undefined || value === null) return null;
+  return requireTestRecord(value, "record");
+}
+
+function isConfigsLayer(value: unknown): boolean {
+  return value === "global" || value === "tool" || value === "account" || value === "agent" || value === "project" || value === "local";
 }

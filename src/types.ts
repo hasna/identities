@@ -164,6 +164,47 @@ export interface InstructionSourceExport {
   metadata: Record<string, unknown>;
 }
 
+export type ConfigsInstructionLayer = "global" | "tool" | "account" | "agent" | "project" | "local";
+
+export interface ConfigsInstructionRule {
+  id: string;
+  label?: string;
+  path?: string;
+  content?: string;
+  globs: string[];
+  hash?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ConfigsInstructionSource {
+  id: string;
+  label: string;
+  layer: ConfigsInstructionLayer;
+  merge: InstructionMergePolicy;
+  order: number;
+  content?: string;
+  targetProviders: string[];
+  owner: InstructionSourceOwner;
+  sourcePaths: InstructionSourcePath[];
+  globs: string[];
+  hash: string;
+  nonOverridable: boolean;
+  replacementScope?: string;
+  rules: ConfigsInstructionRule[];
+  provenance: InstructionSourceProvenance;
+  metadata: Record<string, unknown>;
+}
+
+export interface ConfigsInstructionSourceExport {
+  contract: "hasna.identities.configs-instructions/v1";
+  version: 1;
+  package: "@hasna/identities";
+  exportedAt: string;
+  sources: ConfigsInstructionSource[];
+  validation: InstructionSourceValidationResult;
+  metadata: Record<string, unknown>;
+}
+
 export type IdentityMachineAssignmentStatus = "assigned" | "reserved" | "released";
 
 export interface IdentityMachineAssignment {
