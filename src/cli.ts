@@ -10,6 +10,14 @@ import {
   type Identity,
   type IdentityDocumentKey,
   type IdentityKind,
+  type InstructionProviderCompatibility,
+  type InstructionProviderStrategy,
+  type InstructionSafetyClass,
+  type InstructionSensitivity,
+  type InstructionSource,
+  type InstructionSourceInput,
+  type InstructionSourceKind,
+  type InstructionSourceOwnerKind,
 } from "./types.js";
 import { createEcosystemRegistrationManifest, createAgentIdentityRef } from "./ecosystem.js";
 import {
@@ -19,6 +27,12 @@ import {
   publicIdentityIdentifier,
 } from "./core.js";
 import { syncIdentityContactPointsAndUpdate } from "./integrations.js";
+import {
+  createInstructionSourceExport,
+  instructionSourceSchema,
+  projectInstructionSourcePaths,
+  validateInstructionSources,
+} from "./instructions.js";
 import { writeEveAgent } from "./eve.js";
 import {
   detectIdentityMediaSecrets,
@@ -51,6 +65,8 @@ const booleanFlags = new Set([
   "verified",
   "ready-only",
   "verbose",
+  "non-overridable",
+  "required",
 ]);
 
 const helpText = `identities
@@ -76,6 +92,14 @@ Commands:
   doc set <id|identifier> <key> <value|--file path>
   doc export <id|identifier> --dir <dir>
   doc import <id|identifier> --dir <dir>
+  instructions list [id|identifier]
+  instructions paths [id|identifier]
+  instructions show <source-id>
+  instructions set [global|id|identifier] --kind <kind> --title <title> [--content text|--file path|--source-path path|--editable-source-path path]
+  instructions validate [id|identifier]
+  instructions export [path] [--identity id|identifier]
+  instructions import <path> [--identity id|identifier]
+  instructions sources
   agent manifest <id|identifier>
   agent register --name <name> [--identifier agent:name]
   agent seed-company [--docs-dir dir] [--keep-deprecated]
@@ -210,6 +234,11 @@ async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean)
 
   if (command === "doc") {
     await dispatchDoc(rest, parsed, store, json);
+    return;
+  }
+
+  if (command === "instructions") {
+    await dispatchInstructions(rest, parsed, store, json);
     return;
   }
 
@@ -468,6 +497,114 @@ async function dispatchDoc(rest: string[], parsed: ParsedArgs, store: IdentitySt
   throw new Error(`Unknown doc command: ${subcommand ?? ""}`);
 }
 
+async function dispatchInstructions(rest: string[], parsed: ParsedArgs, store: IdentityStore, json: boolean): Promise<void> {
+  const [subcommand, target] = rest;
+  if (subcommand === "list") {
+    const sources = await store.listInstructionSources({ identityTarget: target });
+    if (json || hasFlag(parsed, "verbose")) output(sources, true);
+    else printInstructionSourceList(sources, parsed);
+    return;
+  }
+
+  if (subcommand === "paths") {
+    const paths = projectInstructionSourcePaths(await store.listInstructionSources({ identityTarget: target }));
+    if (json || hasFlag(parsed, "verbose")) output(paths, true);
+    else {
+      const { rows, total, limit } = limitRows(paths, parsed);
+      printTable(["source", "kind", "owner", "editable", "path"], rows.map((path) => [
+        path.sourceId,
+        path.kind,
+        path.owner,
+        path.editable ? "yes" : "no",
+        path.path,
+      ]));
+      printLimitHint("paths", rows.length, total, limit, "identities instructions paths --limit <n>");
+    }
+    return;
+  }
+
+  if (subcommand === "show") {
+    const source = await store.requireInstructionSource(required(target, "instructions show requires a source id"));
+    if (json || hasFlag(parsed, "verbose")) output(source, true);
+    else printInstructionSourceSummary(source);
+    return;
+  }
+
+  if (subcommand === "set") {
+    const source = await store.setInstructionSource(await instructionSourceInputFromFlags(target, parsed, store));
+    const validation = validateInstructionSources([source]);
+    if (json || hasFlag(parsed, "verbose")) output({ source, validation }, true);
+    else {
+      printInstructionSourceSummary(source);
+      if (!validation.valid) {
+        console.log(`Validation errors: ${validation.issues.filter((issue) => issue.severity === "error").length}`);
+        process.exitCode = 1;
+      }
+    }
+    return;
+  }
+
+  if (subcommand === "validate") {
+    const result = await store.validateInstructionSources({ identityTarget: target });
+    if (json || hasFlag(parsed, "verbose")) output(result, true);
+    else printInstructionValidation(result);
+    if (!result.valid) process.exitCode = 1;
+    return;
+  }
+
+  if (subcommand === "export") {
+    const identityTarget = flagValue(parsed, "identity");
+    const sources = await store.listInstructionSources({ identityTarget });
+    const exported = createInstructionSourceExport(sources, {
+      identityTarget,
+      store: store.filePath,
+    });
+    const targetPath = target;
+    if (targetPath) {
+      await writeFile(targetPath, `${JSON.stringify(exported, null, 2)}\n`, "utf8");
+      if (json || hasFlag(parsed, "verbose")) output({ exported: exported.sources.length, path: targetPath, validation: exported.validation }, true);
+      else console.log(`Exported ${exported.sources.length} instruction sources to ${targetPath}.`);
+    } else {
+      output(exported, true);
+    }
+    if (!exported.validation.valid) process.exitCode = 1;
+    return;
+  }
+
+  if (subcommand === "import") {
+    const path = required(target, "instructions import requires a path");
+    const payload = JSON.parse(await readFile(path, "utf8")) as { sources?: InstructionSourceInput[] };
+    const sources = payload.sources ?? [];
+    const validation = validateInstructionSources(sources);
+    if (!validation.valid) {
+      if (json || hasFlag(parsed, "verbose")) output({ imported: 0, path, validation }, true);
+      else printInstructionValidation(validation);
+      process.exitCode = 1;
+      return;
+    }
+    const imported = await store.replaceInstructionSources(sources, { identityTarget: flagValue(parsed, "identity") });
+    const result = { imported: imported.length, path, validation };
+    if (json || hasFlag(parsed, "verbose")) output(result, true);
+    else console.log(`Imported ${result.imported} instruction sources from ${result.path}.`);
+    return;
+  }
+
+  if (subcommand === "sources" || subcommand === "schema") {
+    const sources = await store.listInstructionSources({ identityTarget: target });
+    const result = { schema: instructionSourceSchema, sources, validation: validateInstructionSources(sources) };
+    if (json || hasFlag(parsed, "verbose")) output(result, true);
+    else {
+      console.log(`Instruction source schema v${instructionSourceSchema.version}`);
+      printInstructionSourceList(sources, parsed);
+      printDetailsHint("Use `--json` for canonical schema, source graph, hashes, and validation details.");
+    }
+    if (!result.validation.valid) process.exitCode = 1;
+    return;
+  }
+
+  throw new Error(`Unknown instructions command: ${subcommand ?? ""}`);
+}
+
 async function dispatchAgent(rest: string[], parsed: ParsedArgs, store: IdentityStore, json: boolean): Promise<void> {
   const [subcommand, target] = rest;
   if (subcommand === "manifest") {
@@ -651,6 +788,160 @@ async function dispatchAsset(rest: string[], parsed: ParsedArgs, store: Identity
   throw new Error(`Unknown asset command: ${subcommand ?? ""}`);
 }
 
+async function instructionSourceInputFromFlags(
+  target: string | undefined,
+  parsed: ParsedArgs,
+  store: IdentityStore,
+): Promise<InstructionSourceInput> {
+  const file = flagValue(parsed, "file");
+  const content = file ? await readFile(file, "utf8") : flagValue(parsed, "content");
+  const kind = parseInstructionKind(required(flagValue(parsed, "kind"), "instructions set requires --kind"));
+  const owner = await instructionOwnerFromFlags(target, parsed, store, kind);
+  return {
+    id: flagValue(parsed, "id"),
+    kind,
+    title: flagValue(parsed, "title"),
+    content,
+    owner,
+    sensitivity: parseInstructionSensitivity(flagValue(parsed, "sensitivity") ?? "internal"),
+    precedence: parseOptionalInteger(flagValue(parsed, "precedence"), "precedence"),
+    mergePolicy: parseInstructionMergePolicy(flagValue(parsed, "merge-policy") ?? flagValue(parsed, "policy") ?? "append"),
+    replacementScope: flagValue(parsed, "replacement-scope"),
+    safety: parseInstructionSafety(flagValue(parsed, "safety") ?? (hasFlag(parsed, "non-overridable") ? "non-overridable-safety" : "standard")),
+    nonOverridable: hasFlag(parsed, "non-overridable") || undefined,
+    ruleIds: flagValues(parsed, "rule-id"),
+    targetProviders: [...flagValues(parsed, "provider"), ...flagValues(parsed, "target-provider")],
+    providerCompatibility: instructionCompatibilityFromFlags(parsed),
+    sourcePaths: instructionSourcePathsFromFlags(parsed),
+    globs: flagValues(parsed, "glob"),
+    provenance: {
+      source: flagValue(parsed, "source") ?? "identities-cli",
+    },
+  };
+}
+
+async function instructionOwnerFromFlags(
+  target: string | undefined,
+  parsed: ParsedArgs,
+  store: IdentityStore,
+  kind: InstructionSourceKind,
+): Promise<{ kind: InstructionSourceOwnerKind; id: string; name?: string }> {
+  const explicitKind = flagValue(parsed, "owner-kind");
+  const explicitId = flagValue(parsed, "owner-id");
+  if (explicitKind || explicitId) {
+    return {
+      kind: parseInstructionOwnerKind(explicitKind ?? defaultOwnerKindForInstruction(kind)),
+      id: required(explicitId ?? target, "instructions set requires --owner-id when --owner-kind is used without a target"),
+      name: flagValue(parsed, "owner-name"),
+    };
+  }
+
+  if (target && target !== "global") {
+    const identity = await store.require(target);
+    return {
+      kind: kind === "persona-doc" ? "persona" : "identity",
+      id: identity.id,
+      name: identity.displayName ?? identity.fullName,
+    };
+  }
+
+  const defaultKind = defaultOwnerKindForInstruction(kind);
+  if (defaultKind !== "global") {
+    throw new Error(`instructions set for ${kind} requires --owner-kind ${defaultKind} --owner-id <id> or an identity target`);
+  }
+  return {
+    kind: "global",
+    id: "global",
+    name: flagValue(parsed, "owner-name"),
+  };
+}
+
+function instructionSourcePathsFromFlags(parsed: ParsedArgs) {
+  return [
+    ...flagValues(parsed, "source-path").map((path) => ({
+      path,
+      editable: false,
+      required: hasFlag(parsed, "required"),
+      format: flagValue(parsed, "format") as "markdown" | "text" | "json" | "yaml" | undefined,
+    })),
+    ...flagValues(parsed, "editable-source-path").map((path) => ({
+      path,
+      editable: true,
+      required: hasFlag(parsed, "required"),
+      format: flagValue(parsed, "format") as "markdown" | "text" | "json" | "yaml" | undefined,
+    })),
+  ];
+}
+
+function instructionCompatibilityFromFlags(parsed: ParsedArgs): InstructionProviderCompatibility[] | undefined {
+  const values = flagValues(parsed, "compat");
+  if (values.length === 0) return undefined;
+  return values.map((value) => {
+    const [provider, strategyRaw = "managed-block", supportedRaw = "true"] = value.split(":");
+    const strategy = parseInstructionProviderStrategy(strategyRaw);
+    return {
+      provider: required(provider, "compat requires provider"),
+      strategy,
+      supported: supportedRaw !== "false" && strategy !== "unsupported",
+      nativePaths: flagValues(parsed, "native-path"),
+    };
+  });
+}
+
+function printInstructionSourceList(sources: InstructionSource[], parsed: ParsedArgs): void {
+  const { rows, total, limit } = limitRows(sources, parsed);
+  printTable(["id", "kind", "owner", "precedence", "policy", "safety", "providers"], rows.map((source) => [
+    source.id,
+    source.kind,
+    `${source.owner.kind}:${source.owner.id}`,
+    String(source.precedence),
+    source.mergePolicy,
+    source.nonOverridable ? "non-overridable" : source.safety,
+    source.targetProviders.join(","),
+  ]));
+  printLimitHint("sources", rows.length, total, limit, "identities instructions list --limit <n>");
+  printDetailsHint("Use `identities instructions show <source-id> --json` for content, hashes, paths, and compatibility.");
+}
+
+function printInstructionSourceSummary(source: InstructionSource): void {
+  console.log(`Instruction source: ${source.title}`);
+  printTable(["field", "value"], [
+    ["id", source.id],
+    ["kind", source.kind],
+    ["owner", `${source.owner.kind}:${source.owner.id}`],
+    ["precedence", String(source.precedence)],
+    ["policy", source.mergePolicy],
+    ["safety", source.nonOverridable ? "non-overridable" : source.safety],
+    ["sensitivity", source.sensitivity],
+    ["rules", source.ruleIds.join(", ")],
+    ["providers", source.targetProviders.join(", ")],
+    ["paths", String(source.sourcePaths.length)],
+    ["hash", source.hash],
+  ]);
+  if (source.content) {
+    console.log(`Content: ${truncate(source.content, defaultPreviewLength)}`);
+    if (source.content.length > defaultPreviewLength) {
+      printDetailsHint("Use `--json` or `--verbose` for full content.");
+    }
+  }
+}
+
+function printInstructionValidation(result: ReturnType<typeof validateInstructionSources>): void {
+  console.log(`${result.valid ? "Valid" : "Invalid"} instruction sources: ${result.sourceCount}.`);
+  console.log(`Effective hash: ${result.effectiveHash}`);
+  if (result.nonOverridableSafetyRules.length > 0) {
+    console.log(`Non-overridable safety rules: ${result.nonOverridableSafetyRules.join(", ")}.`);
+  }
+  if (result.issues.length === 0) return;
+  const { rows } = limitRows(result.issues, { positionals: [], flags: new Map([["limit", ["20"]]]) });
+  printTable(["severity", "code", "source", "message"], rows.map((issue) => [
+    issue.severity,
+    issue.code,
+    issue.sourceId ?? "",
+    issue.message,
+  ]));
+}
+
 function createInputFromFlags(parsed: ParsedArgs) {
   const name = flagValue(parsed, "name") ?? parsed.positionals[1];
   const kind = parseKind(flagValue(parsed, "kind") ?? "human");
@@ -765,6 +1056,67 @@ function required<T>(value: T | undefined, message: string): T {
 function parseKind(kind: string): IdentityKind {
   if (kind === "human" || kind === "agent" || kind === "organization" || kind === "service") return kind;
   throw new Error(`Invalid identity kind: ${kind}`);
+}
+
+function parseInstructionKind(kind: string): InstructionSourceKind {
+  if (
+    kind === "global-rules" ||
+    kind === "provider-rules" ||
+    kind === "global-system-prompt" ||
+    kind === "provider-system-prompt" ||
+    kind === "identity-doc" ||
+    kind === "persona-doc" ||
+    kind === "account-overlay" ||
+    kind === "machine-overlay" ||
+    kind === "project-overlay" ||
+    kind === "session-overlay"
+  ) return kind;
+  throw new Error(`Invalid instruction source kind: ${kind}`);
+}
+
+function parseInstructionOwnerKind(kind: string): InstructionSourceOwnerKind {
+  if (
+    kind === "global" ||
+    kind === "provider" ||
+    kind === "identity" ||
+    kind === "persona" ||
+    kind === "account" ||
+    kind === "machine" ||
+    kind === "project" ||
+    kind === "session"
+  ) return kind;
+  throw new Error(`Invalid instruction owner kind: ${kind}`);
+}
+
+function parseInstructionSensitivity(value: string): InstructionSensitivity {
+  if (value === "public" || value === "internal" || value === "confidential" || value === "secret") return value;
+  throw new Error(`Invalid instruction sensitivity: ${value}`);
+}
+
+function parseInstructionMergePolicy(value: string) {
+  if (value === "append" || value === "replace") return value;
+  throw new Error(`Invalid instruction merge policy: ${value}`);
+}
+
+function parseInstructionSafety(value: string): InstructionSafetyClass {
+  if (value === "standard" || value === "safety" || value === "non-overridable-safety") return value;
+  throw new Error(`Invalid instruction safety class: ${value}`);
+}
+
+function parseInstructionProviderStrategy(value: string): InstructionProviderStrategy {
+  if (value === "native" || value === "import" || value === "managed-block" || value === "rendered" || value === "unsupported") return value;
+  throw new Error(`Invalid instruction provider strategy: ${value}`);
+}
+
+function defaultOwnerKindForInstruction(kind: InstructionSourceKind): InstructionSourceOwnerKind {
+  if (kind === "provider-rules" || kind === "provider-system-prompt") return "provider";
+  if (kind === "identity-doc") return "identity";
+  if (kind === "persona-doc") return "persona";
+  if (kind === "account-overlay") return "account";
+  if (kind === "machine-overlay") return "machine";
+  if (kind === "project-overlay") return "project";
+  if (kind === "session-overlay") return "session";
+  return "global";
 }
 
 function parseVoiceGenerationMode(value: string | undefined): VoiceGenerationMode | undefined {

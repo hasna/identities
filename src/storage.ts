@@ -14,6 +14,13 @@ import {
   reserveBrowserPlanProfile,
   updateIdentity,
 } from "./core.js";
+import {
+  listIdentityInstructionSources,
+  normalizeInstructionSource,
+  normalizeInstructionSources,
+  sortInstructionSources,
+  validateInstructionSources,
+} from "./instructions.js";
 import type {
   BrowserPlanCoverageOptions,
   ListBrowserPlanProfilesOptions,
@@ -28,6 +35,9 @@ import type {
   IdentityAssetInput,
   IdentityContactCard,
   IdentityIdentifier,
+  InstructionSource,
+  InstructionSourceInput,
+  InstructionSourceValidationResult,
   IdentityMachineAssignmentInput,
   PhoneNumber,
   UpdateIdentityInput,
@@ -45,6 +55,12 @@ export interface ListByMachineOptions {
 interface IdentityStoreFile {
   version: 1;
   identities: Identity[];
+  instructionSources?: InstructionSource[];
+}
+
+export interface ListInstructionSourceOptions {
+  identityTarget?: string;
+  includeIdentityDocuments?: boolean;
 }
 
 export function getIdentityDataDir(): string {
@@ -75,6 +91,80 @@ export class IdentityStore {
 
   async listCards(): Promise<IdentityContactCard[]> {
     return (await this.list()).map(identityToContactCard);
+  }
+
+  async listInstructionSources(options: ListInstructionSourceOptions = {}): Promise<InstructionSource[]> {
+    const store = await this.readStore();
+    const identities = options.identityTarget
+      ? [requireIdentityFromList(store.identities, options.identityTarget)]
+      : store.identities;
+    const storeSources = options.identityTarget ? [] : normalizeInstructionSources(store.instructionSources);
+    const identitySources = identities.flatMap((identity) => listIdentityInstructionSources(identity, {
+      includeDocuments: options.includeIdentityDocuments,
+    }));
+    return sortInstructionSources([...storeSources, ...identitySources]);
+  }
+
+  async getInstructionSource(id: string): Promise<InstructionSource | undefined> {
+    return (await this.listInstructionSources()).find((source) => source.id === id);
+  }
+
+  async requireInstructionSource(id: string): Promise<InstructionSource> {
+    const source = await this.getInstructionSource(id);
+    if (!source) throw new Error(`Instruction source not found: ${id}`);
+    return source;
+  }
+
+  async setInstructionSource(input: InstructionSourceInput | InstructionSource): Promise<InstructionSource> {
+    return this.withMutation(async () => {
+      const store = await this.readStore();
+      const normalized = normalizeInstructionSource(input);
+      if (normalized.owner.kind === "identity" || normalized.owner.kind === "persona") {
+        const identity = requireIdentityFromList(store.identities, normalized.owner.id);
+        const source = normalizeInstructionSource({
+          ...normalized,
+          owner: {
+            ...normalized.owner,
+            id: identity.id,
+            name: normalized.owner.name ?? identity.displayName ?? identity.fullName,
+          },
+        }, { identityId: identity.id });
+        identity.instructionSources = upsertInstructionSource(identity.instructionSources, source);
+        await this.writeStore(store);
+        await this.writeAuditEvent("set-instruction-source", source.id);
+        return source;
+      }
+
+      store.instructionSources = upsertInstructionSource(store.instructionSources ?? [], normalized);
+      await this.writeStore(store);
+      await this.writeAuditEvent("set-instruction-source", normalized.id);
+      return normalized;
+    });
+  }
+
+  async replaceInstructionSources(
+    sources: Array<InstructionSourceInput | InstructionSource>,
+    options: { identityTarget?: string } = {},
+  ): Promise<InstructionSource[]> {
+    return this.withMutation(async () => {
+      const store = await this.readStore();
+      if (options.identityTarget) {
+        const identity = requireIdentityFromList(store.identities, options.identityTarget);
+        identity.instructionSources = normalizeInstructionSources(sources, { identityId: identity.id });
+        await this.writeStore(store);
+        await this.writeAuditEvent("replace-identity-instruction-sources", identity.id);
+        return identity.instructionSources;
+      }
+
+      store.instructionSources = normalizeInstructionSources(sources);
+      await this.writeStore(store);
+      await this.writeAuditEvent("replace-instruction-sources", `${store.instructionSources.length}`);
+      return store.instructionSources;
+    });
+  }
+
+  async validateInstructionSources(options: ListInstructionSourceOptions = {}): Promise<InstructionSourceValidationResult> {
+    return validateInstructionSources(await this.listInstructionSources(options));
   }
 
   async listByMachine(machineId: string, options: ListByMachineOptions = {}): Promise<Identity[]> {
@@ -221,10 +311,14 @@ export class IdentityStore {
     try {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as IdentityStoreFile;
-      return { version: 1, identities: (parsed.identities ?? []).map(normalizePersistedIdentity) };
+      return {
+        version: 1,
+        identities: (parsed.identities ?? []).map(normalizePersistedIdentity),
+        instructionSources: normalizeInstructionSources(parsed.instructionSources),
+      };
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {
-        return { version: 1, identities: [] };
+        return { version: 1, identities: [], instructionSources: [] };
       }
       throw error;
     }
@@ -294,6 +388,19 @@ function matchesIdentity(identity: Identity, target: string): boolean {
     identity.emails.some((email) => email.address.toLowerCase() === normalizedTarget) ||
     identity.phones.some((phone) => phone.number === target)
   );
+}
+
+function requireIdentityFromList(identities: Identity[], target: string): Identity {
+  const identity = identities.find((candidate) => matchesIdentity(candidate, target));
+  if (!identity) throw new Error(`Identity not found: ${target}`);
+  return identity;
+}
+
+function upsertInstructionSource(sources: InstructionSource[], source: InstructionSource): InstructionSource[] {
+  return sortInstructionSources([
+    ...sources.filter((candidate) => candidate.id !== source.id),
+    source,
+  ]);
 }
 
 function identifierMatches(identifier: IdentityIdentifier, target: string): boolean {

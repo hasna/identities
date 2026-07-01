@@ -32,7 +32,7 @@ export {
   updateIdentity,
 } from "./core.js";
 export { createIdentityStore, getIdentityDataDir, getIdentityStorePath, IdentityStore } from "./storage.js";
-export type { IdentityStoreOptions, ListByMachineOptions } from "./storage.js";
+export type { IdentityStoreOptions, ListByMachineOptions, ListInstructionSourceOptions } from "./storage.js";
 export {
   browserPlanDefaultMachineIds,
   browserPlanExcludedMachineIds,
@@ -42,6 +42,19 @@ export {
 export { createAgentIdentityRef, createEcosystemRegistrationManifest } from "./ecosystem.js";
 export { listEveDocumentKeys, writeEveAgent } from "./eve.js";
 export { applyContactPointSyncResults, syncIdentityContactPoints, syncIdentityContactPointsAndUpdate } from "./integrations.js";
+export {
+  createIdentityDocumentInstructionSources,
+  createInstructionSourceExport,
+  hashInstructionContent,
+  instructionSourceKindPrecedence,
+  instructionSourceSchema,
+  listIdentityInstructionSources,
+  normalizeInstructionSource,
+  normalizeInstructionSources,
+  projectInstructionSourcePaths,
+  sortInstructionSources,
+  validateInstructionSources,
+} from "./instructions.js";
 export { getIdentityReferenceStatus, getIdentityStoreStatus } from "./status.js";
 export {
   createElevenLabsAdapter,
@@ -134,6 +147,21 @@ export type {
   IdentityMachineAssignmentInput,
   IdentityMachineAssignmentStatus,
   IdentityMediaSource,
+  InstructionMergePolicy,
+  InstructionProviderCompatibility,
+  InstructionProviderStrategy,
+  InstructionSafetyClass,
+  InstructionSensitivity,
+  InstructionSource,
+  InstructionSourceExport,
+  InstructionSourceInput,
+  InstructionSourceKind,
+  InstructionSourceOwner,
+  InstructionSourceOwnerKind,
+  InstructionSourcePath,
+  InstructionSourceProvenance,
+  InstructionSourceValidationIssue,
+  InstructionSourceValidationResult,
   PhoneNumber,
   ProfileImage,
   SyncRef,

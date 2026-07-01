@@ -26,6 +26,10 @@ identities machine assign agent:ava-example machine001 --purpose browserplan --s
 identities browserplan reserve agent:ava-example --machine machine001 --slot profile-01 --json
 identities browserplan coverage --target 8 --json
 identities doc set agent:ava-example ethos "Protect user intent and identity data."
+identities instructions set global --kind global-rules --title "Global Safety" --content "Never expose secrets." --rule-id safety:no-secrets --provider codewith --non-overridable --json
+identities instructions list --json
+identities instructions validate --json
+identities instructions export ./instructions.json --json
 identities agent manifest agent:ava-example --json
 identities agent seed-company --docs-dir agents/hasna --json
 identities eve export agent:ava-example --out ./ava-agent
@@ -175,6 +179,67 @@ The repo currently defines adapter contracts instead of hard-coding package depe
 See [docs/integrations.md](docs/integrations.md) for the first sync contract.
 See [docs/browserplan.md](docs/browserplan.md) for the BrowserPlan machine, identity, email, and profile reservation contract.
 See [docs/media.md](docs/media.md) for voice and profile image generation.
+See [docs/instructions.md](docs/instructions.md) for the instruction-source schema, precedence, export contract, and fail-closed safety rules.
+
+## Instruction Sources
+
+OpenIdentities owns the canonical instruction-source graph for humans, agents,
+personas, accounts, machines, projects, sessions, global rules, and provider
+rules. OpenConfigs and launchers should consume this graph and render
+tool-native files; they should not duplicate identity/persona documents.
+
+Instruction sources carry:
+
+- `kind`: `global-rules`, `provider-rules`, `global-system-prompt`,
+  `provider-system-prompt`, `identity-doc`, `persona-doc`, `account-overlay`,
+  `machine-overlay`, `project-overlay`, or `session-overlay`
+- `owner`: global, provider, identity/persona, account, machine, project, or
+  session owner refs
+- `precedence`, `mergePolicy` (`append` or `replace`), `replacementScope`,
+  `ruleIds`, `targetProviders`, provider compatibility, globs, source paths,
+  editable path markers, sensitivity, provenance, and SHA-256 hashes
+- fail-closed safety flags: non-overridable safety sources must append, must
+  declare rule IDs, cannot be replaced by later sources, cannot conflict with a
+  duplicate rule ID, and cannot carry `secret` sensitivity
+
+CLI examples:
+
+```bash
+identities instructions set global \
+  --kind global-rules \
+  --title "Global Safety Rules" \
+  --content "Never expose API keys, tokens, or secrets." \
+  --rule-id safety:no-secrets \
+  --provider codewith \
+  --editable-source-path /home/hasna/CODEWITH.md \
+  --non-overridable \
+  --json
+
+identities instructions set \
+  --kind provider-system-prompt \
+  --owner-kind provider \
+  --owner-id codewith \
+  --title "Codewith System Prompt" \
+  --content "Render through the Codewith provider adapter." \
+  --provider codewith \
+  --compat codewith:managed-block:true \
+  --json
+
+identities instructions list --json
+identities instructions paths --json
+identities instructions show <source-id> --json
+identities instructions validate --json
+identities instructions export ./instructions.json --json
+identities instructions import ./instructions.json --json
+identities instructions sources --json
+```
+
+`instructions list` includes store-level global/provider sources, explicit
+identity sources, and derived sources from populated identity documents such as
+`prompt`, `personality`, `ethos`, and `voice`. The production export contract is
+`{ version: 1, package: "@hasna/identities", exportedAt, sources, validation,
+metadata }`; downstream renderers should reject exports where
+`validation.valid` is false.
 
 ## Vercel Eve
 

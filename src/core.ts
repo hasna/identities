@@ -15,12 +15,14 @@ import type {
   IdentityIdentifier,
   IdentityMachineAssignment,
   IdentityMachineAssignmentInput,
+  InstructionSourceInput,
   PhoneNumber,
   ProfileImage,
   UpdateIdentityInput,
   VoiceProfile,
 } from "./types.js";
 import { identityDocumentKeys } from "./types.js";
+import { normalizeInstructionSources } from "./instructions.js";
 
 export const OPEN_IDENTITIES_SCHEME = "open-identities";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -127,6 +129,7 @@ export function createIdentity(input: CreateIdentityInput): Identity {
     emails,
     phones,
     documents: { ...createDefaultDocuments(), ...(input.documents ?? {}) },
+    instructionSources: normalizeInstructionSources(input.instructionSources, { identityId: id }),
     voice: input.voice ? normalizeVoiceProfile(input.voice) : undefined,
     profileImage: input.profileImage ? normalizeProfileImage(input.profileImage) : undefined,
     assets: normalizeIdentityAssets(input.assets),
@@ -168,6 +171,9 @@ export function updateIdentity(identity: Identity, input: UpdateIdentityInput): 
     emails,
     phones: input.phones ? ensureSinglePrimary(input.phones.map(normalizePhone)) : identity.phones,
     documents: input.documents ? { ...identity.documents, ...input.documents } : identity.documents,
+    instructionSources: input.instructionSources
+      ? normalizeInstructionSources(input.instructionSources, { identityId: identity.id })
+      : normalizeInstructionSources(identity.instructionSources as InstructionSourceInput[] | undefined, { identityId: identity.id }),
     voice:
       input.voice === null ? undefined : input.voice ? normalizeVoiceProfile(input.voice, identity.voice) : identity.voice,
     profileImage:
@@ -206,6 +212,7 @@ export function normalizePersistedIdentity(identity: Identity): Identity {
     emails,
     phones: ensureSinglePrimary((identity.phones ?? []).map(normalizePhone)),
     documents: { ...createDefaultDocuments(), ...(identity.documents ?? {}) },
+    instructionSources: normalizeInstructionSources(identity.instructionSources, { identityId: identity.id }),
     voice: identity.voice ? normalizeVoiceProfile(identity.voice) : undefined,
     profileImage: identity.profileImage ? normalizeProfileImage(identity.profileImage) : undefined,
     assets: normalizeIdentityAssets(identity.assets ?? []),

@@ -29,6 +29,141 @@ export type IdentityAssetStatus = "planned" | "generated" | "failed";
 
 export type IdentityMediaSource = "generated" | "imported" | "external";
 
+export const instructionSourceKinds = [
+  "global-rules",
+  "provider-rules",
+  "global-system-prompt",
+  "provider-system-prompt",
+  "identity-doc",
+  "persona-doc",
+  "account-overlay",
+  "machine-overlay",
+  "project-overlay",
+  "session-overlay",
+] as const;
+
+export type InstructionSourceKind = (typeof instructionSourceKinds)[number];
+
+export const instructionOwnerKinds = [
+  "global",
+  "provider",
+  "identity",
+  "persona",
+  "account",
+  "machine",
+  "project",
+  "session",
+] as const;
+
+export type InstructionSourceOwnerKind = (typeof instructionOwnerKinds)[number];
+
+export const instructionSensitivityLevels = ["public", "internal", "confidential", "secret"] as const;
+
+export type InstructionSensitivity = (typeof instructionSensitivityLevels)[number];
+
+export const instructionMergePolicies = ["append", "replace"] as const;
+
+export type InstructionMergePolicy = (typeof instructionMergePolicies)[number];
+
+export const instructionSafetyClasses = ["standard", "safety", "non-overridable-safety"] as const;
+
+export type InstructionSafetyClass = (typeof instructionSafetyClasses)[number];
+
+export const instructionProviderStrategies = [
+  "native",
+  "import",
+  "managed-block",
+  "rendered",
+  "unsupported",
+] as const;
+
+export type InstructionProviderStrategy = (typeof instructionProviderStrategies)[number];
+
+export interface InstructionSourceOwner {
+  kind: InstructionSourceOwnerKind;
+  id: string;
+  name?: string;
+}
+
+export interface InstructionSourcePath {
+  path: string;
+  editable: boolean;
+  required?: boolean;
+  format?: "markdown" | "text" | "json" | "yaml";
+  hash?: string;
+  label?: string;
+}
+
+export interface InstructionProviderCompatibility {
+  provider: string;
+  supported: boolean;
+  strategy: InstructionProviderStrategy;
+  nativePaths?: string[];
+  notes?: string;
+  minVersion?: string;
+}
+
+export interface InstructionSourceProvenance {
+  createdAt: string;
+  updatedAt: string;
+  source?: string;
+  importedFrom?: string;
+}
+
+export interface InstructionSource {
+  id: string;
+  kind: InstructionSourceKind;
+  title: string;
+  content?: string;
+  owner: InstructionSourceOwner;
+  sensitivity: InstructionSensitivity;
+  precedence: number;
+  mergePolicy: InstructionMergePolicy;
+  replacementScope?: string;
+  safety: InstructionSafetyClass;
+  nonOverridable: boolean;
+  ruleIds: string[];
+  targetProviders: string[];
+  providerCompatibility: InstructionProviderCompatibility[];
+  sourcePaths: InstructionSourcePath[];
+  globs: string[];
+  hash: string;
+  pathHash?: string;
+  provenance: InstructionSourceProvenance;
+  metadata: Record<string, unknown>;
+}
+
+export type InstructionSourceInput = Partial<Omit<InstructionSource, "kind" | "owner" | "provenance">> & {
+  kind: InstructionSourceKind;
+  owner?: Partial<InstructionSourceOwner>;
+  provenance?: Partial<InstructionSourceProvenance>;
+};
+
+export interface InstructionSourceValidationIssue {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  sourceId?: string;
+  ruleId?: string;
+}
+
+export interface InstructionSourceValidationResult {
+  valid: boolean;
+  sourceCount: number;
+  issues: InstructionSourceValidationIssue[];
+  effectiveHash: string;
+  nonOverridableSafetyRules: string[];
+}
+
+export interface InstructionSourceExport {
+  version: 1;
+  package: "@hasna/identities";
+  exportedAt: string;
+  sources: InstructionSource[];
+  validation: InstructionSourceValidationResult;
+  metadata: Record<string, unknown>;
+}
+
 export type IdentityMachineAssignmentStatus = "assigned" | "reserved" | "released";
 
 export interface IdentityMachineAssignment {
@@ -168,6 +303,7 @@ export interface Identity {
   emails: EmailAddress[];
   phones: PhoneNumber[];
   documents: IdentityDocumentSet;
+  instructionSources: InstructionSource[];
   voice?: VoiceProfile;
   profileImage?: ProfileImage;
   assets: IdentityAsset[];
@@ -202,6 +338,7 @@ export interface CreateIdentityInput {
   emails?: Array<EmailAddress | string>;
   phones?: Array<PhoneNumber | string>;
   documents?: IdentityDocumentSet;
+  instructionSources?: InstructionSourceInput[];
   voice?: Partial<VoiceProfile>;
   profileImage?: Partial<ProfileImage>;
   assets?: IdentityAssetInput[];
@@ -223,6 +360,7 @@ export interface UpdateIdentityInput {
   emails?: Array<EmailAddress | string>;
   phones?: Array<PhoneNumber | string>;
   documents?: IdentityDocumentSet;
+  instructionSources?: InstructionSourceInput[];
   voice?: Partial<VoiceProfile> | null;
   profileImage?: Partial<ProfileImage> | null;
   assets?: IdentityAssetInput[];
