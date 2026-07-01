@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Added canonical instruction sources, instruction CLI commands, validation, import/export, and fail-closed safety checks.
+
 ## 0.1.3
 
 - Added first-class `voice`, `profileImage`, and generated `assets` metadata to identities.

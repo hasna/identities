@@ -19,7 +19,7 @@ import {
 } from "./core.js";
 
 const PACKAGE_NAME = "@hasna/identities";
-const FALLBACK_PACKAGE_VERSION = "0.1.3";
+const FALLBACK_PACKAGE_VERSION = "0.1.4";
 const IDENTITY_KINDS: IdentityKind[] = ["human", "agent", "organization", "service"];
 
 export interface IdentityStatusRef {

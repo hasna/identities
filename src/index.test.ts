@@ -639,7 +639,7 @@ describe("open-identities", () => {
     const versionOutput = await captureStdout(async () => {
       await runCli(["--json", "version"]);
     });
-    expect(JSON.parse(versionOutput).version).toBe("0.1.3");
+    expect(JSON.parse(versionOutput).version).toBe("0.1.4");
   });
 
   test("CLI exposes instruction source list, paths, show, set, validate, export, import, and sources", async () => {
