@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+- Added the canonical Hasna global coding-agent system prompt, non-overridable rules, and provider overlays for Codewith, Claude Code, and Codex.
+- Exposed canonical global agent instruction sources through the SDK and `identities instructions sources/export --canonical`.
+
 ## 0.1.4
 
 - Added canonical instruction sources, instruction CLI commands, validation, import/export, and fail-closed safety checks.

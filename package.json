@@ -1,6 +1,6 @@
 {
   "name": "@hasna/identities",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Open identity records for humans and AI agents",
   "type": "module",
   "main": "dist/src/index.js",
@@ -28,6 +28,10 @@
     "./instructions": {
       "types": "./dist/instructions.d.ts",
       "import": "./dist/src/instructions.js"
+    },
+    "./global-agent-rules": {
+      "types": "./dist/global-agent-rules.d.ts",
+      "import": "./dist/src/global-agent-rules.js"
     },
     "./ecosystem": {
       "types": "./dist/ecosystem.d.ts",
@@ -66,7 +70,7 @@
   ],
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "bun run clean && bun build ./src/index.ts ./src/storage.ts ./src/browserplan.ts ./src/integrations.ts ./src/instructions.ts ./src/ecosystem.ts ./src/eve.ts ./src/status.ts ./src/media.ts ./src/roster.ts ./src/cli.ts --outdir dist --target bun && tsc --emitDeclarationOnly --outDir dist",
+    "build": "bun run clean && bun build ./src/index.ts ./src/storage.ts ./src/browserplan.ts ./src/integrations.ts ./src/instructions.ts ./src/global-agent-rules.ts ./src/ecosystem.ts ./src/eve.ts ./src/status.ts ./src/media.ts ./src/roster.ts ./src/cli.ts --outdir dist --target bun && tsc --emitDeclarationOnly --outDir dist",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "verify:release": "bun run typecheck && bun test && bun run build && npm pack --dry-run --ignore-scripts",

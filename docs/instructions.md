@@ -70,3 +70,60 @@ Non-overridable safety sources fail closed:
 Renderers should use `hash` and `effectiveHash` for manifests and should keep
 provider artifacts derived. The editable source path, owner ref, and provenance
 point back to OpenIdentities as the source of truth.
+
+## Canonical Global Agent Rules
+
+OpenIdentities publishes the Hasna global coding-agent instruction source set
+as built-in data. It is intentionally not a renderer. OpenConfigs and other
+consumers should retrieve the source graph, validate it, and render derived
+provider files or managed blocks in their own layer.
+
+```bash
+identities instructions sources --canonical --json
+identities instructions sources --canonical --provider codewith --json
+identities instructions export --canonical --provider claude --json
+```
+
+The canonical set includes:
+
+- `hasna-global-coding-agent-system-prompt`
+- `hasna-global-coding-agent-non-overridable-rules`
+- `hasna-codewith-global-agent-overlay`
+- `hasna-claude-global-agent-overlay`
+- `hasna-codex-global-agent-overlay`
+
+Provider filtering keeps the global prompt and global rules, then includes only
+matching provider overlays. For example, `--provider codewith` returns the two
+global sources and the Codewith overlay.
+
+Required rule coverage is part of the source content:
+
+- Knowledge must use the Knowledge CLI or SDK, never ad hoc global Markdown
+  under `$HOME/.hasna`, `$HOME/.husna`, or similar scratch paths.
+- Planning and evidence must use Todos CLI tasks and todos plans.
+- Mementos, Conversations, and Projects CLIs remain source of truth in their
+  domains.
+- Coordinator sessions delegate product-code implementation through subagents
+  or task workflows.
+- Codewith-native loops and OpenLoops are different mechanisms and terms.
+- Dispatch failures require self-healing of the owning package or workflow; no
+  tmux prompt-paste fallback is allowed without explicit human authorization.
+- Non-trivial work needs adversarial verification or a labeled adversarial
+  self-review when no reviewer can be spawned.
+- Secrets must not be exposed, commit/push secrets scans are mandatory, and
+  commits must not use Co-Authored-By trailers.
+- Bun is preferred for Hasna JavaScript and TypeScript repositories, with
+  package release-age registry hygiene when new supervised Hasna packages are
+  created or published.
+
+SDK consumers can use:
+
+```ts
+import {
+  createGlobalAgentInstructionSourceExport,
+  listGlobalAgentInstructionSources,
+} from "@hasna/identities";
+
+const sources = listGlobalAgentInstructionSources({ providers: ["codewith"] });
+const exportPayload = createGlobalAgentInstructionSourceExport({ providers: ["codewith"] });
+```

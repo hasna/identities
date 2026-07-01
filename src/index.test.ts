@@ -5,14 +5,17 @@ import { describe, expect, test } from "bun:test";
 import {
   createHasnaCompanyAgentInputs,
   createBrowserPlanCoverageReport,
+  createGlobalAgentInstructionSourceExport,
   createInstructionSourceExport,
   createIdentity,
   deprecatedHasnaCompanyAgentIdentifiers,
   generateIdentityProfileImage,
   generateIdentityVoice,
+  globalAgentInstructionSourceSet,
   hasnaCompanyAgentSpecs,
   IdentityStore,
   listIdentityInstructionSources,
+  listGlobalAgentInstructionSources,
   listBrowserPlanProfiles,
   normalizeInstructionSource,
   seedHasnaCompanyAgents,
@@ -639,7 +642,55 @@ describe("open-identities", () => {
     const versionOutput = await captureStdout(async () => {
       await runCli(["--json", "version"]);
     });
-    expect(JSON.parse(versionOutput).version).toBe("0.1.4");
+    expect(JSON.parse(versionOutput).version).toBe("0.1.5");
+  });
+
+  test("exposes canonical global coding-agent prompt and provider overlays", () => {
+    const sources = listGlobalAgentInstructionSources();
+    expect(sources.map((source) => source.id)).toEqual([
+      "hasna-global-coding-agent-non-overridable-rules",
+      "hasna-global-coding-agent-system-prompt",
+      "hasna-claude-global-agent-overlay",
+      "hasna-codewith-global-agent-overlay",
+      "hasna-codex-global-agent-overlay",
+    ]);
+
+    const validation = validateInstructionSources(sources);
+    expect(validation.valid).toBe(true);
+    expect(validation.nonOverridableSafetyRules).toEqual(expect.arrayContaining([
+      "knowledge:cli-sdk-only",
+      "dispatch:self-heal-no-tmux-fallback",
+      "verification:minimum-adversarial",
+      "security:secrets-scan-before-commit-push",
+      "packages:bun-release-age-registry",
+    ]));
+
+    const combined = sources.map((source) => source.content ?? "").join("\n");
+    expect(combined).toContain("Knowledge CLI or SDK");
+    expect(combined).toContain("$HOME/.hasna");
+    expect(combined).toContain("$HOME/.husna");
+    expect(combined).toContain("Todos CLI");
+    expect(combined).toContain("Mementos, Conversations, and Projects CLIs");
+    expect(combined).toContain("Coordinator sessions");
+    expect(combined).toContain("Codewith native loops");
+    expect(combined).toContain("OpenLoops");
+    expect(combined).toContain("Do not use tmux prompt paste");
+    expect(combined).toContain("staged secrets scan");
+    expect(combined).toContain("Co-Authored-By");
+    expect(combined).toContain("Bun");
+    expect(combined).toContain("release-age");
+
+    const codewithSources = listGlobalAgentInstructionSources({ providers: ["codewith"] });
+    expect(codewithSources.some((source) => source.id === "hasna-codewith-global-agent-overlay")).toBe(true);
+    expect(codewithSources.some((source) => source.id === "hasna-claude-global-agent-overlay")).toBe(false);
+    expect(codewithSources.some((source) => source.owner.kind === "global")).toBe(true);
+
+    const exported = createGlobalAgentInstructionSourceExport({ providers: ["codewith"] });
+    expect(exported.validation.valid).toBe(true);
+    expect(exported.metadata).toMatchObject({
+      sourceSet: globalAgentInstructionSourceSet.id,
+      sourceSetVersion: globalAgentInstructionSourceSet.version,
+    });
   });
 
   test("CLI exposes instruction source list, paths, show, set, validate, export, import, and sources", async () => {
@@ -805,6 +856,23 @@ describe("open-identities", () => {
     }));
     expect(sources.schema.version).toBe(1);
     expect(sources.validation.valid).toBe(true);
+
+    const canonicalSources = JSON.parse(await captureStdout(async () => {
+      await runCli(["--json", "--store", storePath, "instructions", "sources", "--canonical", "--provider", "codewith"]);
+    }));
+    expect(canonicalSources.canonical).toMatchObject({ id: globalAgentInstructionSourceSet.id });
+    expect(canonicalSources.validation.valid).toBe(true);
+    expect(canonicalSources.sources.map((source: { id: string }) => source.id)).toEqual([
+      "hasna-global-coding-agent-non-overridable-rules",
+      "hasna-global-coding-agent-system-prompt",
+      "hasna-codewith-global-agent-overlay",
+    ]);
+
+    const canonicalExport = JSON.parse(await captureStdout(async () => {
+      await runCli(["--json", "--store", storePath, "instructions", "export", "--canonical", "--provider", "codewith"]);
+    }));
+    expect(canonicalExport.sources.map((source: { id: string }) => source.id)).toEqual(canonicalSources.sources.map((source: { id: string }) => source.id));
+    expect(canonicalExport.metadata).toMatchObject({ sourceSet: globalAgentInstructionSourceSet.id });
 
     await captureStdout(async () => {
       await runCli(["--json", "--store", storePath, "instructions", "export", exportPath]);

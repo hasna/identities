@@ -55,6 +55,13 @@ export {
   sortInstructionSources,
   validateInstructionSources,
 } from "./instructions.js";
+export {
+  createGlobalAgentInstructionSourceExport,
+  globalAgentInstructionProviders,
+  globalAgentInstructionSourceInputs,
+  globalAgentInstructionSourceSet,
+  listGlobalAgentInstructionSources,
+} from "./global-agent-rules.js";
 export { getIdentityReferenceStatus, getIdentityStoreStatus } from "./status.js";
 export {
   createElevenLabsAdapter,
@@ -122,6 +129,10 @@ export type {
   BrowserPlanCoverageOptions,
   ListBrowserPlanProfilesOptions,
 } from "./browserplan.js";
+export type {
+  GlobalAgentInstructionProvider,
+  GlobalAgentInstructionSourceOptions,
+} from "./global-agent-rules.js";
 export type {
   AgentProfile,
   AgentRegistrationManifest,

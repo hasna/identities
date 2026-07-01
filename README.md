@@ -30,6 +30,7 @@ identities instructions set global --kind global-rules --title "Global Safety" -
 identities instructions list --json
 identities instructions validate --json
 identities instructions export ./instructions.json --json
+identities instructions sources --canonical --provider codewith --json
 identities agent manifest agent:ava-example --json
 identities agent seed-company --docs-dir agents/hasna --json
 identities eve export agent:ava-example --out ./ava-agent
@@ -232,6 +233,8 @@ identities instructions validate --json
 identities instructions export ./instructions.json --json
 identities instructions import ./instructions.json --json
 identities instructions sources --json
+identities instructions sources --canonical --provider codewith --json
+identities instructions export --canonical --provider codewith --json
 ```
 
 `instructions list` includes store-level global/provider sources, explicit
@@ -240,6 +243,29 @@ identity sources, and derived sources from populated identity documents such as
 `{ version: 1, package: "@hasna/identities", exportedAt, sources, validation,
 metadata }`; downstream renderers should reject exports where
 `validation.valid` is false.
+
+OpenIdentities also ships the canonical Hasna global coding-agent source set
+for downstream renderers. It contains one global system prompt, one
+non-overridable global rules source, and provider overlays for Codewith, Claude
+Code, and Codex. OpenConfigs should consume these sources and render managed
+provider blocks; it remains responsible for file rendering and merge mechanics.
+
+The canonical set includes rules for Knowledge CLI/SDK usage, Todos plans and
+evidence, Mementos/Conversations/Projects source-of-truth boundaries,
+coordinator delegation, Codewith-native loop terminology versus OpenLoops,
+dispatch self-healing without tmux fallback, adversarial verification, secrets
+safety, commit/push secrets scans, no Co-Authored-By trailers, Bun preference,
+and Hasna package release-age registry hygiene.
+
+SDK consumers can import the same data from `@hasna/identities`:
+
+```ts
+import { createGlobalAgentInstructionSourceExport } from "@hasna/identities";
+
+const exportForCodewith = createGlobalAgentInstructionSourceExport({
+  providers: ["codewith"],
+});
+```
 
 ## Vercel Eve
 

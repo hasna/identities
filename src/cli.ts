@@ -33,6 +33,11 @@ import {
   projectInstructionSourcePaths,
   validateInstructionSources,
 } from "./instructions.js";
+import {
+  createGlobalAgentInstructionSourceExport,
+  globalAgentInstructionSourceSet,
+  listGlobalAgentInstructionSources,
+} from "./global-agent-rules.js";
 import { writeEveAgent } from "./eve.js";
 import {
   detectIdentityMediaSecrets,
@@ -49,7 +54,7 @@ interface ParsedArgs {
   flags: Map<string, string[]>;
 }
 
-const version = "0.1.4";
+const version = "0.1.5";
 const booleanFlags = new Set([
   "json",
   "help",
@@ -67,6 +72,7 @@ const booleanFlags = new Set([
   "verbose",
   "non-overridable",
   "required",
+  "canonical",
 ]);
 
 const helpText = `identities
@@ -92,14 +98,14 @@ Commands:
   doc set <id|identifier> <key> <value|--file path>
   doc export <id|identifier> --dir <dir>
   doc import <id|identifier> --dir <dir>
-  instructions list [id|identifier]
-  instructions paths [id|identifier]
-  instructions show <source-id>
+  instructions list [id|identifier] [--canonical] [--provider provider]
+  instructions paths [id|identifier] [--canonical] [--provider provider]
+  instructions show <source-id> [--canonical] [--provider provider]
   instructions set [global|id|identifier] --kind <kind> --title <title> [--content text|--file path|--source-path path|--editable-source-path path]
-  instructions validate [id|identifier]
-  instructions export [path] [--identity id|identifier]
+  instructions validate [id|identifier] [--canonical] [--provider provider]
+  instructions export [path] [--identity id|identifier] [--canonical] [--provider provider]
   instructions import <path> [--identity id|identifier]
-  instructions sources
+  instructions sources [--canonical] [--provider provider]
   agent manifest <id|identifier>
   agent register --name <name> [--identifier agent:name]
   agent seed-company [--docs-dir dir] [--keep-deprecated]
@@ -508,14 +514,19 @@ async function dispatchDoc(rest: string[], parsed: ParsedArgs, store: IdentitySt
 async function dispatchInstructions(rest: string[], parsed: ParsedArgs, store: IdentityStore, json: boolean): Promise<void> {
   const [subcommand, target] = rest;
   if (subcommand === "list") {
-    const sources = await store.listInstructionSources({ identityTarget: target });
+    const sources = hasFlag(parsed, "canonical")
+      ? canonicalInstructionSourcesFromFlags(parsed)
+      : await store.listInstructionSources({ identityTarget: target });
     if (json || hasFlag(parsed, "verbose")) output(sources, true);
     else printInstructionSourceList(sources, parsed);
     return;
   }
 
   if (subcommand === "paths") {
-    const paths = projectInstructionSourcePaths(await store.listInstructionSources({ identityTarget: target }));
+    const sources = hasFlag(parsed, "canonical")
+      ? canonicalInstructionSourcesFromFlags(parsed)
+      : await store.listInstructionSources({ identityTarget: target });
+    const paths = projectInstructionSourcePaths(sources);
     if (json || hasFlag(parsed, "verbose")) output(paths, true);
     else {
       const { rows, total, limit } = limitRows(paths, parsed);
@@ -532,7 +543,10 @@ async function dispatchInstructions(rest: string[], parsed: ParsedArgs, store: I
   }
 
   if (subcommand === "show") {
-    const source = await store.requireInstructionSource(required(target, "instructions show requires a source id"));
+    const sourceId = required(target, "instructions show requires a source id");
+    const source = hasFlag(parsed, "canonical")
+      ? requireCanonicalInstructionSource(sourceId, parsed)
+      : await store.requireInstructionSource(sourceId);
     if (json || hasFlag(parsed, "verbose")) output(source, true);
     else printInstructionSourceSummary(source);
     return;
@@ -553,7 +567,9 @@ async function dispatchInstructions(rest: string[], parsed: ParsedArgs, store: I
   }
 
   if (subcommand === "validate") {
-    const result = await store.validateInstructionSources({ identityTarget: target });
+    const result = hasFlag(parsed, "canonical")
+      ? validateInstructionSources(canonicalInstructionSourcesFromFlags(parsed))
+      : await store.validateInstructionSources({ identityTarget: target });
     if (json || hasFlag(parsed, "verbose")) output(result, true);
     else printInstructionValidation(result);
     if (!result.valid) process.exitCode = 1;
@@ -562,11 +578,12 @@ async function dispatchInstructions(rest: string[], parsed: ParsedArgs, store: I
 
   if (subcommand === "export") {
     const identityTarget = flagValue(parsed, "identity");
-    const sources = await store.listInstructionSources({ identityTarget });
-    const exported = createInstructionSourceExport(sources, {
-      identityTarget,
-      store: store.filePath,
-    });
+    const exported = hasFlag(parsed, "canonical")
+      ? createGlobalAgentInstructionSourceExport({ providers: canonicalProviderFlags(parsed) })
+      : createInstructionSourceExport(await store.listInstructionSources({ identityTarget }), {
+        identityTarget,
+        store: store.filePath,
+      });
     const targetPath = target;
     if (targetPath) {
       await writeFile(targetPath, `${JSON.stringify(exported, null, 2)}\n`, "utf8");
@@ -598,11 +615,21 @@ async function dispatchInstructions(rest: string[], parsed: ParsedArgs, store: I
   }
 
   if (subcommand === "sources" || subcommand === "schema") {
-    const sources = await store.listInstructionSources({ identityTarget: target });
-    const result = { schema: instructionSourceSchema, sources, validation: validateInstructionSources(sources) };
+    const sources = hasFlag(parsed, "canonical")
+      ? canonicalInstructionSourcesFromFlags(parsed)
+      : await store.listInstructionSources({ identityTarget: target });
+    const result = {
+      schema: instructionSourceSchema,
+      canonical: hasFlag(parsed, "canonical") ? globalAgentInstructionSourceSet : undefined,
+      sources,
+      validation: validateInstructionSources(sources),
+    };
     if (json || hasFlag(parsed, "verbose")) output(result, true);
     else {
       console.log(`Instruction source schema v${instructionSourceSchema.version}`);
+      if (hasFlag(parsed, "canonical")) {
+        console.log(`Canonical source set: ${globalAgentInstructionSourceSet.id} ${globalAgentInstructionSourceSet.version}`);
+      }
       printInstructionSourceList(sources, parsed);
       printDetailsHint("Use `--json` for canonical schema, source graph, hashes, and validation details.");
     }
@@ -611,6 +638,20 @@ async function dispatchInstructions(rest: string[], parsed: ParsedArgs, store: I
   }
 
   throw new Error(`Unknown instructions command: ${subcommand ?? ""}`);
+}
+
+function canonicalInstructionSourcesFromFlags(parsed: ParsedArgs): InstructionSource[] {
+  return listGlobalAgentInstructionSources({ providers: canonicalProviderFlags(parsed) });
+}
+
+function canonicalProviderFlags(parsed: ParsedArgs): string[] {
+  return [...flagValues(parsed, "provider"), ...flagValues(parsed, "target-provider")];
+}
+
+function requireCanonicalInstructionSource(sourceId: string, parsed: ParsedArgs): InstructionSource {
+  const source = canonicalInstructionSourcesFromFlags(parsed).find((candidate) => candidate.id === sourceId);
+  if (!source) throw new Error(`Canonical instruction source not found: ${sourceId}`);
+  return source;
 }
 
 async function dispatchAgent(rest: string[], parsed: ParsedArgs, store: IdentityStore, json: boolean): Promise<void> {
