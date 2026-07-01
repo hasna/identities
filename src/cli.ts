@@ -279,23 +279,31 @@ async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean)
 
   if (command === "export") {
     const identities = await store.list();
+    const instructionSources = await store.listStoreInstructionSources();
     const targetPath = rest[0];
+    const payload = { version: 1, identities, instructionSources };
     if (targetPath) {
-      await writeFile(targetPath, `${JSON.stringify({ version: 1, identities }, null, 2)}\n`, "utf8");
-      const result = { exported: identities.length, path: targetPath };
+      await writeFile(targetPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+      const result = { exported: identities.length, instructionSources: instructionSources.length, path: targetPath };
       if (json || hasFlag(parsed, "verbose")) output(result, true);
       else console.log(`Exported ${result.exported} identities to ${result.path}.`);
     } else {
-      output({ version: 1, identities }, true);
+      output(payload, true);
     }
     return;
   }
 
   if (command === "import") {
     const path = required(rest[0], "import requires a path");
-    const parsedImport = JSON.parse(await readFile(path, "utf8")) as { identities?: Identity[] };
-    await store.replaceAll(parsedImport.identities ?? []);
-    const result = { imported: parsedImport.identities?.length ?? 0, path };
+    const parsedImport = JSON.parse(await readFile(path, "utf8")) as { identities?: Identity[]; instructionSources?: InstructionSourceInput[] };
+    await store.replaceAll(parsedImport.identities ?? [], {
+      instructionSources: parsedImport.instructionSources,
+    });
+    const result = {
+      imported: parsedImport.identities?.length ?? 0,
+      instructionSources: parsedImport.instructionSources?.length,
+      path,
+    };
     if (json || hasFlag(parsed, "verbose")) output(result, true);
     else console.log(`Imported ${result.imported} identities from ${result.path}.`);
     return;
@@ -532,7 +540,7 @@ async function dispatchInstructions(rest: string[], parsed: ParsedArgs, store: I
 
   if (subcommand === "set") {
     const source = await store.setInstructionSource(await instructionSourceInputFromFlags(target, parsed, store));
-    const validation = validateInstructionSources([source]);
+    const validation = await store.validateInstructionSources();
     if (json || hasFlag(parsed, "verbose")) output({ source, validation }, true);
     else {
       printInstructionSourceSummary(source);

@@ -63,6 +63,10 @@ export interface ListInstructionSourceOptions {
   includeIdentityDocuments?: boolean;
 }
 
+export interface ReplaceAllOptions {
+  instructionSources?: Array<InstructionSourceInput | InstructionSource>;
+}
+
 export function getIdentityDataDir(): string {
   return join(homedir(), ".hasna", "identities");
 }
@@ -95,14 +99,11 @@ export class IdentityStore {
 
   async listInstructionSources(options: ListInstructionSourceOptions = {}): Promise<InstructionSource[]> {
     const store = await this.readStore();
-    const identities = options.identityTarget
-      ? [requireIdentityFromList(store.identities, options.identityTarget)]
-      : store.identities;
-    const storeSources = options.identityTarget ? [] : normalizeInstructionSources(store.instructionSources);
-    const identitySources = identities.flatMap((identity) => listIdentityInstructionSources(identity, {
-      includeDocuments: options.includeIdentityDocuments,
-    }));
-    return sortInstructionSources([...storeSources, ...identitySources]);
+    return listInstructionSourcesFromStore(store, options);
+  }
+
+  async listStoreInstructionSources(): Promise<InstructionSource[]> {
+    return normalizeInstructionSources((await this.readStore()).instructionSources);
   }
 
   async getInstructionSource(id: string): Promise<InstructionSource | undefined> {
@@ -129,13 +130,19 @@ export class IdentityStore {
             name: normalized.owner.name ?? identity.displayName ?? identity.fullName,
           },
         }, { identityId: identity.id });
-        identity.instructionSources = upsertInstructionSource(identity.instructionSources, source);
+        const nextIdentities = store.identities.map((candidate) => candidate.id === identity.id
+          ? { ...candidate, instructionSources: upsertInstructionSource(candidate.instructionSources, source) }
+          : candidate);
+        assertValidInstructionSourceGraph({ ...store, identities: nextIdentities });
+        store.identities = nextIdentities;
         await this.writeStore(store);
         await this.writeAuditEvent("set-instruction-source", source.id);
         return source;
       }
 
-      store.instructionSources = upsertInstructionSource(store.instructionSources ?? [], normalized);
+      const nextStoreSources = upsertInstructionSource(store.instructionSources ?? [], normalized);
+      assertValidInstructionSourceGraph({ ...store, instructionSources: nextStoreSources });
+      store.instructionSources = nextStoreSources;
       await this.writeStore(store);
       await this.writeAuditEvent("set-instruction-source", normalized.id);
       return normalized;
@@ -150,13 +157,20 @@ export class IdentityStore {
       const store = await this.readStore();
       if (options.identityTarget) {
         const identity = requireIdentityFromList(store.identities, options.identityTarget);
-        identity.instructionSources = normalizeInstructionSources(sources, { identityId: identity.id });
+        const nextSources = normalizeInstructionSources(sources, { identityId: identity.id });
+        const nextIdentities = store.identities.map((candidate) => candidate.id === identity.id
+          ? { ...candidate, instructionSources: nextSources }
+          : candidate);
+        assertValidInstructionSourceGraph({ ...store, identities: nextIdentities });
+        store.identities = nextIdentities;
         await this.writeStore(store);
         await this.writeAuditEvent("replace-identity-instruction-sources", identity.id);
-        return identity.instructionSources;
+        return nextSources;
       }
 
-      store.instructionSources = normalizeInstructionSources(sources);
+      const nextStoreSources = normalizeInstructionSources(sources);
+      assertValidInstructionSourceGraph({ ...store, instructionSources: nextStoreSources });
+      store.instructionSources = nextStoreSources;
       await this.writeStore(store);
       await this.writeAuditEvent("replace-instruction-sources", `${store.instructionSources.length}`);
       return store.instructionSources;
@@ -225,13 +239,19 @@ export class IdentityStore {
     });
   }
 
-  async replaceAll(identities: Identity[]): Promise<void> {
+  async replaceAll(identities: Identity[], options: ReplaceAllOptions = {}): Promise<void> {
     return this.withMutation(async () => {
+      const current = await this.readStore();
       const normalized = identities.map((identity) => updateIdentity(identity, {}));
       for (const identity of normalized) {
         assertNoDuplicate(normalized, identity, identity.id);
       }
-      await this.writeStore({ version: 1, identities: normalized });
+      const instructionSources = options.instructionSources === undefined
+        ? current.instructionSources
+        : normalizeInstructionSources(options.instructionSources);
+      const nextStore = { version: 1 as const, identities: normalized, instructionSources };
+      assertValidInstructionSourceGraph(nextStore);
+      await this.writeStore(nextStore);
       await this.writeAuditEvent("replace-all", `${normalized.length}`);
     });
   }
@@ -401,6 +421,31 @@ function upsertInstructionSource(sources: InstructionSource[], source: Instructi
     ...sources.filter((candidate) => candidate.id !== source.id),
     source,
   ]);
+}
+
+function listInstructionSourcesFromStore(
+  store: IdentityStoreFile,
+  options: ListInstructionSourceOptions = {},
+): InstructionSource[] {
+  const identities = options.identityTarget
+    ? [requireIdentityFromList(store.identities, options.identityTarget)]
+    : store.identities;
+  const storeSources = options.identityTarget ? [] : normalizeInstructionSources(store.instructionSources);
+  const identitySources = identities.flatMap((identity) => listIdentityInstructionSources(identity, {
+    includeDocuments: options.includeIdentityDocuments,
+  }));
+  return sortInstructionSources([...storeSources, ...identitySources]);
+}
+
+function assertValidInstructionSourceGraph(store: IdentityStoreFile): void {
+  const result = validateInstructionSources(listInstructionSourcesFromStore(store));
+  if (result.valid) return;
+  const errors = result.issues.filter((issue) => issue.severity === "error");
+  const summary = errors.map((issue) => {
+    const source = issue.sourceId ? ` ${issue.sourceId}` : "";
+    return `${issue.code}${source}: ${issue.message}`;
+  }).join("; ");
+  throw new Error(`Invalid instruction source graph: ${summary}`);
 }
 
 function identifierMatches(identifier: IdentityIdentifier, target: string): boolean {
