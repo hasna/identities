@@ -158,8 +158,12 @@ Required rule coverage is part of the source content:
 - Codewith-native loops and OpenLoops are different mechanisms and terms.
 - Dispatch failures require self-healing of the owning package or workflow; no
   tmux prompt-paste fallback is allowed without explicit human authorization.
-- Non-trivial work needs adversarial verification or a labeled adversarial
-  self-review when no reviewer can be spawned.
+- Adversarial verification applies to normal answers, user-requested audits,
+  deep research, implementation/code/config changes, release/publish/local/fleet
+  rollout work, QA, and final verification. Coordinators must use at least one
+  adversarial reviewer and usually two for substantial or high-risk work; when no
+  adversarial agent can be spawned, perform and label an adversarial self-review
+  with the same standards.
 - Secrets must not be exposed, commit/push secrets scans are mandatory, and
   commits must not use Co-Authored-By trailers.
 - Bun is preferred for Hasna JavaScript and TypeScript repositories, with

@@ -54,7 +54,7 @@ interface ParsedArgs {
   flags: Map<string, string[]>;
 }
 
-const version = "0.1.5";
+const version = "0.1.6";
 const booleanFlags = new Set([
   "json",
   "help",

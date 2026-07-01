@@ -258,9 +258,14 @@ responsible for file rendering, path dereferencing, and merge mechanics.
 The canonical set includes rules for Knowledge CLI/SDK usage, Todos plans and
 evidence, Mementos/Conversations/Projects source-of-truth boundaries,
 coordinator delegation, Codewith-native loop terminology versus OpenLoops,
-dispatch self-healing without tmux fallback, adversarial verification, secrets
-safety, commit/push secrets scans, no Co-Authored-By trailers, Bun preference,
-and Hasna package release-age registry hygiene.
+dispatch self-healing without tmux fallback, adversarial verification for
+normal answers, user-requested audits, deep research, implementation/code/config
+changes, release/publish/local/fleet rollout work, QA, and final verification,
+coordinator review expectations of at least one adversarial reviewer and usually
+two for substantial or high-risk work, labeled adversarial self-review when no
+adversarial agent can be spawned, secrets safety, commit/push secrets scans, no
+Co-Authored-By trailers, Bun preference, and Hasna package release-age registry
+hygiene.
 
 SDK consumers can import the same data from `@hasna/identities`:
 

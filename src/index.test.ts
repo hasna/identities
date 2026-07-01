@@ -644,7 +644,7 @@ describe("open-identities", () => {
     const versionOutput = await captureStdout(async () => {
       await runCli(["--json", "version"]);
     });
-    expect(JSON.parse(versionOutput).version).toBe("0.1.5");
+    expect(JSON.parse(versionOutput).version).toBe("0.1.6");
   });
 
   test("exposes canonical global coding-agent prompt and provider overlays", () => {
@@ -683,6 +683,16 @@ describe("open-identities", () => {
     expect(combined).toContain("Bun");
     expect(combined).toContain("release-age");
     expect(combined).toContain("OpenCode Provider Overlay");
+    expect(combined).toContain("normal answers");
+    expect(combined).toContain("user-requested audits");
+    expect(combined).toContain("deep research");
+    expect(combined).toContain("implementation/code/config changes");
+    expect(combined).toContain("release/publish/local/fleet rollout work");
+    expect(combined).toContain("QA, and final verification");
+    expect(combined).toContain("at least one adversarial reviewer");
+    expect(combined).toContain("usually two for substantial or high-risk work");
+    expect(combined).toContain("If no adversarial agent can be spawned");
+    expect(combined).toContain("label an adversarial self-review with the same standards");
 
     const codewithSources = listGlobalAgentInstructionSources({ providers: ["codewith"] });
     expect(codewithSources.some((source) => source.id === "hasna-codewith-global-agent-overlay")).toBe(true);
@@ -720,6 +730,40 @@ describe("open-identities", () => {
     ]);
     expect(configsExport.sources[0]).toMatchObject({ layer: "global", merge: "append", order: 100 });
     expect(configsExport.sources[2]).toMatchObject({ layer: "tool", merge: "append", order: 200 });
+  });
+
+  test("CLI canonical provider exports include explicit adversarial review coverage", async () => {
+    const expectedMarkers = [
+      "normal answers",
+      "user-requested audits",
+      "deep research",
+      "implementation/code/config changes",
+      "release/publish/local/fleet rollout work",
+      "QA, and final verification",
+      "at least one adversarial reviewer",
+      "usually two for substantial or high-risk work",
+      "If no adversarial agent can be spawned",
+      "label an adversarial self-review with the same standards",
+    ];
+
+    for (const provider of ["codewith", "claude", "codex"]) {
+      const output = await captureStdout(async () => {
+        await runCli(["--json", "instructions", "export", "--canonical", "--provider", provider]);
+      });
+      const exported = JSON.parse(output);
+      expect(exported.contract).toBe(configsInstructionExportContract);
+      expect(exported.validation.valid).toBe(true);
+      expect(exported.sources.map((source: { id: string }) => source.id)).toEqual([
+        "hasna-global-coding-agent-non-overridable-rules",
+        "hasna-global-coding-agent-system-prompt",
+        `hasna-${provider}-global-agent-overlay`,
+      ]);
+
+      const renderedText = exported.sources.map((source: { content?: string }) => source.content ?? "").join("\n");
+      for (const marker of expectedMarkers) {
+        expect(renderedText).toContain(marker);
+      }
+    }
   });
 
   test("CLI exposes instruction source list, paths, show, set, validate, export, import, and sources", async () => {
