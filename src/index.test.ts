@@ -278,6 +278,60 @@ describe("open-identities", () => {
     expect((await store.listCards())[0].primaryEmail).toBe("jordan@example.com");
   });
 
+  test("persists name updates by identifier alias and by oid across store reloads", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-alias-update-"));
+    const storePath = join(dir, "identities.json");
+    const store = new IdentityStore({ filePath: storePath, auditPath: join(dir, "audit.jsonl") });
+    const created = await store.create({
+      kind: "agent",
+      fullName: "Marcus",
+      displayName: "Marcus Mail Operations Agent",
+      uniqueIdentifier: "agent:marcus-regression",
+    });
+
+    await store.update("agent:marcus-regression", { fullName: "Marcus Chief of Staff" });
+    const reloadedAfterAlias = await new IdentityStore({ filePath: storePath }).require("agent:marcus-regression");
+    expect(reloadedAfterAlias.fullName).toBe("Marcus Chief of Staff");
+    expect(reloadedAfterAlias.displayName).toBe("Marcus Mail Operations Agent");
+
+    await store.update(created.id, { fullName: "Marcus Second Rename", displayName: "Marcus Chief of Staff" });
+    const reloadedAfterOid = await new IdentityStore({ filePath: storePath }).require("agent:marcus-regression");
+    expect(reloadedAfterOid.fullName).toBe("Marcus Second Rename");
+    expect(reloadedAfterOid.displayName).toBe("Marcus Chief of Staff");
+  });
+
+  test("CLI update --name changes are visible in human output when a display name is set", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-update-visibility-"));
+    const storePath = join(dir, "identities.json");
+    await captureStdout(async () => {
+      await runCli([
+        "--store",
+        storePath,
+        "create",
+        "--kind",
+        "agent",
+        "--name",
+        "Marcus",
+        "--display-name",
+        "Marcus Mail Operations Agent",
+        "--identifier",
+        "agent:marcus-visibility",
+      ]);
+    });
+
+    const updateOutput = await captureStdout(async () => {
+      await runCli(["--store", storePath, "update", "agent:marcus-visibility", "--name", "Marcus Chief of Staff"]);
+    });
+    expect(updateOutput).toContain("Marcus Chief of Staff");
+    expect(updateOutput).toContain("--display-name");
+
+    const showOutput = await captureStdout(async () => {
+      await runCli(["--store", storePath, "show", "agent:marcus-visibility"]);
+    });
+    expect(showOutput).toContain("Marcus Chief of Staff");
+    expect(showOutput).toContain("Marcus Mail Operations Agent");
+  });
+
   test("syncs contact points through adapters", async () => {
     const identity = createIdentity({
       kind: "agent",
@@ -644,7 +698,7 @@ describe("open-identities", () => {
     const versionOutput = await captureStdout(async () => {
       await runCli(["--json", "version"]);
     });
-    expect(JSON.parse(versionOutput).version).toBe("0.1.5");
+    expect(JSON.parse(versionOutput).version).toBe("0.1.7");
   });
 
   test("exposes canonical global coding-agent prompt and provider overlays", () => {

@@ -54,7 +54,7 @@ interface ParsedArgs {
   flags: Map<string, string[]>;
 }
 
-const version = "0.1.5";
+const version = "0.1.7";
 const booleanFlags = new Set([
   "json",
   "help",
@@ -203,7 +203,18 @@ async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean)
 
   if (command === "update") {
     const target = required(rest[0], "update requires an identity target");
-    outputIdentity(await store.update(target, createUpdateFromFlags(parsed)), parsed, json, "Updated identity");
+    const updated = await store.update(target, createUpdateFromFlags(parsed));
+    outputIdentity(updated, parsed, json, "Updated identity");
+    if (
+      !json &&
+      !hasFlag(parsed, "verbose") &&
+      flagValue(parsed, "name") !== undefined &&
+      flagValue(parsed, "display-name") === undefined &&
+      updated.displayName !== undefined &&
+      updated.displayName !== updated.fullName
+    ) {
+      console.log(`Note: display name remains "${updated.displayName}"; pass --display-name to change it.`);
+    }
     return;
   }
 
@@ -1206,6 +1217,8 @@ function printIdentitySummary(identity: Identity, label: string): void {
   printTable(["field", "value"], [
     ["id", identity.id],
     ["kind", identity.kind],
+    ["name", identity.fullName],
+    ["displayName", identity.displayName ?? ""],
     ["identifier", identityIdentifierToString(publicIdentityIdentifier(identity))],
     ["primaryEmail", primaryEmail ? `${primaryEmail.address}${primaryEmail.verified ? " (verified)" : ""}` : ""],
     ["phones", String(identity.phones.length)],

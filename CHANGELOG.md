@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.7
+
+- Fixed `identities update <target> --name` appearing to be a silent no-op when the identity has a display name: the human `update`/`show` summaries now include `name` (fullName) and `displayName` rows, so renames are always visible.
+- Added a hint after `update --name` when a differing display name still masks the presented name, pointing to `--display-name`.
+- Added regression tests proving update-by-identifier-alias (`agent:<name>`) and update-by-oid both persist across store reloads.
+
+## 0.1.6
+
+- Published release (version bump only; no committed source changes).
+
 ## 0.1.5
 
 - Added the canonical Hasna global coding-agent system prompt, non-overridable rules, and provider overlays for Codewith, Claude Code, Codex, and OpenCode.
