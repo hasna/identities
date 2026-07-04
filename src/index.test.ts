@@ -15,6 +15,7 @@ import {
   generateIdentityVoice,
   globalAgentInstructionSourceSet,
   hasnaCompanyAgentSpecs,
+  identityIdentifierToString,
   IdentityStore,
   listIdentityInstructionSources,
   listGlobalAgentInstructionSources,
@@ -298,6 +299,100 @@ describe("open-identities", () => {
     const reloadedAfterOid = await new IdentityStore({ filePath: storePath }).require("agent:marcus-regression");
     expect(reloadedAfterOid.fullName).toBe("Marcus Second Rename");
     expect(reloadedAfterOid.displayName).toBe("Marcus Chief of Staff");
+  });
+
+  test("renames the unique identifier via update, keeps the old identifier resolving, and audits the change", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-identifier-rename-"));
+    const storePath = join(dir, "identities.json");
+    const auditPath = join(dir, "audit.jsonl");
+    const store = new IdentityStore({ filePath: storePath, auditPath });
+    const created = await store.create({
+      kind: "agent",
+      fullName: "Kai Engineering Manager",
+      displayName: "Kai",
+      uniqueIdentifier: "agent:aurelius-rename",
+    });
+
+    const updated = await store.update(created.id, { uniqueIdentifier: "agent:kai-rename" });
+    expect(identityIdentifierToString(updated.uniqueIdentifier)).toBe("agent:kai-rename");
+
+    const reloaded = new IdentityStore({ filePath: storePath, auditPath });
+    const byNewIdentifier = await reloaded.require("agent:kai-rename");
+    expect(byNewIdentifier.id).toBe(created.id);
+    expect(identityIdentifierToString(byNewIdentifier.uniqueIdentifier)).toBe("agent:kai-rename");
+    expect((await reloaded.listCards())[0].identifier).toBe("agent:kai-rename");
+
+    const byOldIdentifier = await reloaded.require("agent:aurelius-rename");
+    expect(byOldIdentifier.id).toBe(created.id);
+
+    const auditEvents = (await readFile(auditPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as { action: string; target: string });
+    const renameEvent = auditEvents.find((event) => event.action === "rename-identifier");
+    expect(renameEvent).toBeDefined();
+    expect(renameEvent?.target).toContain(created.id);
+    expect(renameEvent?.target).toContain("agent:aurelius-rename");
+    expect(renameEvent?.target).toContain("agent:kai-rename");
+  });
+
+  test("rejects identifier rename onto an identifier held by another identity and changes nothing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-identifier-conflict-"));
+    const storePath = join(dir, "identities.json");
+    const store = new IdentityStore({ filePath: storePath, auditPath: join(dir, "audit.jsonl") });
+    const first = await store.create({ kind: "agent", fullName: "First Agent", uniqueIdentifier: "agent:holder-a" });
+    await store.create({ kind: "agent", fullName: "Second Agent", uniqueIdentifier: "agent:holder-b" });
+
+    await expect(store.update(first.id, { uniqueIdentifier: "agent:holder-b" })).rejects.toThrow(/already in use/);
+
+    const reloaded = await new IdentityStore({ filePath: storePath }).require(first.id);
+    expect(identityIdentifierToString(reloaded.uniqueIdentifier)).toBe("agent:holder-a");
+    expect(reloaded.identifiers.some((identifier) => identityIdentifierToString(identifier) === "agent:holder-b")).toBe(false);
+  });
+
+  test("validates identifier format on update consistently with create", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-identifier-format-"));
+    const store = new IdentityStore({ filePath: join(dir, "identities.json"), auditPath: join(dir, "audit.jsonl") });
+    const created = await store.create({ kind: "agent", fullName: "Format Agent", uniqueIdentifier: "agent:format-agent" });
+
+    await expect(store.update(created.id, { uniqueIdentifier: "agent:   " })).rejects.toThrow(/identifier value cannot be empty/);
+    await expect(store.update(created.id, { uniqueIdentifier: "   " })).rejects.toThrow(/identifier cannot be empty/);
+
+    const reloaded = await store.require(created.id);
+    expect(identityIdentifierToString(reloaded.uniqueIdentifier)).toBe("agent:format-agent");
+  });
+
+  test("CLI update --identifier renames the durable identifier and show resolves old and new", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-identities-cli-identifier-rename-"));
+    const storePath = join(dir, "identities.json");
+    await captureStdout(async () => {
+      await runCli([
+        "--store",
+        storePath,
+        "create",
+        "--kind",
+        "agent",
+        "--name",
+        "Kai Engineering Manager",
+        "--display-name",
+        "Kai",
+        "--identifier",
+        "agent:cli-aurelius",
+      ]);
+    });
+
+    const updateOutput = await captureStdout(async () => {
+      await runCli(["--store", storePath, "update", "agent:cli-aurelius", "--identifier", "agent:cli-kai"]);
+    });
+    expect(updateOutput).toContain("agent:cli-kai");
+
+    const showNew = await captureStdout(async () => {
+      await runCli(["--store", storePath, "show", "agent:cli-kai"]);
+    });
+    expect(showNew).toContain("Kai Engineering Manager");
+    expect(showNew).toContain("agent:cli-kai");
+
+    const showOld = await captureStdout(async () => {
+      await runCli(["--store", storePath, "show", "agent:cli-aurelius"]);
+    });
+    expect(showOld).toContain("Kai Engineering Manager");
   });
 
   test("CLI update --name changes are visible in human output when a display name is set", async () => {
@@ -698,7 +793,7 @@ describe("open-identities", () => {
     const versionOutput = await captureStdout(async () => {
       await runCli(["--json", "version"]);
     });
-    expect(JSON.parse(versionOutput).version).toBe("0.1.7");
+    expect(JSON.parse(versionOutput).version).toBe("0.1.8");
   });
 
   test("exposes canonical global coding-agent prompt and provider overlays", () => {

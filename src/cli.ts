@@ -54,7 +54,7 @@ interface ParsedArgs {
   flags: Map<string, string[]>;
 }
 
-const version = "0.1.7";
+const version = "0.1.8";
 const booleanFlags = new Set([
   "json",
   "help",
@@ -82,7 +82,7 @@ Usage:
 
 Commands:
   create --name <name> [--kind human|agent|organization|service] [--identifier scheme:value] [--email address] [--phone number]
-  update <id|identifier> [--name <name>] [--display-name <name>] [--kind kind]
+  update <id|identifier> [--name <name>] [--display-name <name>] [--kind kind] [--identifier scheme:value]
   list [--limit n]
   status [--verbose]
   show <id|identifier|email|phone> [--verbose]

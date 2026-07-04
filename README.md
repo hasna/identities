@@ -20,6 +20,7 @@ identities create --kind agent --name "Ava Example" --identifier agent:ava-examp
 identities list
 identities show agent:ava-example
 identities show agent:ava-example --verbose
+identities update agent:ava-example --identifier agent:ava-renamed
 identities link-email agent:ava-example ava@hasna.xyz --verified --mailery-id mailery-address-id
 identities link-phone agent:ava-example +15555550199
 identities machine assign agent:ava-example machine001 --purpose browserplan --slot profile-01 --json
@@ -42,6 +43,8 @@ identities media generate-roster --voices --profile-images --dry-run --json
 identities validate --json
 identities status --json
 ```
+
+`update <target> --identifier scheme:value` renames the durable unique identifier. The previous identifier is kept as a secondary identifier so existing references keep resolving, renames onto an identifier held by another identity fail without changes, and a `rename-identifier` audit event is recorded.
 
 Data is stored in `~/.hasna/identities/identities.json`.
 Use `OPEN_IDENTITIES_STORE=/path/to/identities.json` or `--store <path>` for isolated scripts and tests. When `--store <path>` is used, the CLI writes audit events to `<path>.audit.jsonl` unless `--audit <path>` is provided.

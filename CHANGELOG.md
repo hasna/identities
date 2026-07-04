@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.8
+
+- Added durable identifier renaming: `identities update <target> --identifier scheme:value` changes the unique identifier while keeping the previous identifier as a secondary alias, so old references keep resolving.
+- Renaming onto an identifier already held by another identity now fails with a clear `Identifier already in use by another identity` error and leaves the record unchanged.
+- Identifier renames emit a `rename-identifier` audit event recording the old and new identifiers.
+- Documented `--identifier` in the `update` usage/help text and README.
+
 ## 0.1.7
 
 - Fixed `identities update <target> --name` appearing to be a silent no-op when the identity has a display name: the human `update`/`show` summaries now include `name` (fullName) and `displayName` rows, so renames are always visible.

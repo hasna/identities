@@ -9,6 +9,7 @@ import {
   createIdentity,
   identityHasMachineAssignment,
   identityToContactCard,
+  normalizeIdentifier,
   normalizeMachineId,
   normalizePersistedIdentity,
   reserveBrowserPlanProfile,
@@ -365,17 +366,37 @@ export class IdentityStore {
     const index = store.identities.findIndex((identity) => matchesIdentity(identity, target));
     if (index === -1) throw new Error(`Identity not found: ${target}`);
 
+    const current = store.identities[index];
+    const previousIdentifierKey = identifierKey(current.uniqueIdentifier);
+    if (input.uniqueIdentifier !== undefined) {
+      const nextIdentifierKey = identifierKey(normalizeIdentifier(input.uniqueIdentifier));
+      const holder = store.identities.find((candidate) => {
+        if (candidate.id === current.id) return false;
+        return (
+          identifierKey(candidate.uniqueIdentifier) === nextIdentifierKey ||
+          candidate.identifiers.some((identifier) => identifierKey(identifier) === nextIdentifierKey)
+        );
+      });
+      if (holder) {
+        throw new Error(`Identifier already in use by another identity: ${nextIdentifierKey} (held by ${holder.id})`);
+      }
+    }
+
     const mergedAssets: IdentityAssetInput[] | undefined = input.assets
-      ? [...store.identities[index].assets, ...input.assets]
+      ? [...current.assets, ...input.assets]
       : undefined;
-    const updated = updateIdentity(store.identities[index], {
+    const updated = updateIdentity(current, {
       ...input,
       assets: mergedAssets,
     });
-    assertNoDuplicate(store.identities, updated, store.identities[index].id);
+    assertNoDuplicate(store.identities, updated, current.id);
     store.identities[index] = updated;
     await this.writeStore(store);
     await this.writeAuditEvent("update", updated.id);
+    const nextIdentifierKey = identifierKey(updated.uniqueIdentifier);
+    if (nextIdentifierKey !== previousIdentifierKey) {
+      await this.writeAuditEvent("rename-identifier", `${updated.id} ${previousIdentifierKey} -> ${nextIdentifierKey}`);
+    }
     return updated;
   }
 

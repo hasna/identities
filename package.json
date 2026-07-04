@@ -1,6 +1,6 @@
 {
   "name": "@hasna/identities",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Open identity records for humans and AI agents",
   "type": "module",
   "main": "dist/src/index.js",
