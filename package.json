@@ -6,12 +6,26 @@
   "main": "dist/src/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "identities": "dist/src/cli.js"
+    "identities": "dist/src/cli.js",
+    "identities-mcp": "dist/src/mcp/index.js",
+    "identities-serve": "dist/src/server/index.js"
   },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/src/index.js"
+    },
+    "./sdk": {
+      "types": "./dist/sdk/index.d.ts",
+      "import": "./dist/src/sdk/index.js"
+    },
+    "./pg-store": {
+      "types": "./dist/pg-store.d.ts",
+      "import": "./dist/src/pg-store.js"
+    },
+    "./migrations": {
+      "types": "./dist/migrations.d.ts",
+      "import": "./dist/src/migrations.js"
     },
     "./storage": {
       "types": "./dist/storage.d.ts",
@@ -70,11 +84,15 @@
   ],
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "bun run clean && bun build ./src/index.ts ./src/storage.ts ./src/browserplan.ts ./src/integrations.ts ./src/instructions.ts ./src/global-agent-rules.ts ./src/ecosystem.ts ./src/eve.ts ./src/status.ts ./src/media.ts ./src/roster.ts ./src/cli.ts --outdir dist --target bun && tsc --emitDeclarationOnly --outDir dist",
+    "build": "bun run clean && bun build ./src/index.ts ./src/storage.ts ./src/pg-store.ts ./src/migrations.ts ./src/version.ts ./src/browserplan.ts ./src/integrations.ts ./src/instructions.ts ./src/global-agent-rules.ts ./src/ecosystem.ts ./src/eve.ts ./src/status.ts ./src/media.ts ./src/roster.ts ./src/cli.ts ./src/mcp/index.ts ./src/server/index.ts ./src/sdk/index.ts --outdir dist --target bun --external pg --external @hasna/contracts --external @modelcontextprotocol/sdk --external zod && tsc --emitDeclarationOnly --outDir dist",
+    "generate:sdk": "bun run scripts/generate-sdk.ts",
+    "vendor-kit:check": "bunx @hasna/contracts vendor-kit . --check --no-contract",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "verify:release": "bun run typecheck && bun test && bun run build && npm pack --dry-run --ignore-scripts",
     "dev:cli": "bun run src/cli.ts",
+    "dev:mcp": "bun run src/mcp/index.ts",
+    "dev:serve": "bun run src/server/index.ts",
     "prepublishOnly": "bun run verify:release",
     "postinstall": "mkdir -p $HOME/.hasna/identities 2>/dev/null || true"
   },
@@ -109,6 +127,13 @@
   "devDependencies": {
     "@types/bun": "^1.2.4",
     "@types/node": "^22.13.4",
+    "@types/pg": "^8.11.10",
     "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "@hasna/contracts": "0.4.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "pg": "^8.16.3",
+    "zod": "^3.24.2"
   }
 }
