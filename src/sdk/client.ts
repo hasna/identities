@@ -2,7 +2,7 @@
 // Regenerate: bun run generate:sdk
 
 // @generated from OpenAPI by @hasna/contracts SDK generator — DO NOT EDIT.
-// Source: Identities API 0.1.8
+// Source: Identities API 0.2.0
 
 export interface Identity { "id": string; "kind": "human" | "agent" | "organization" | "service"; "fullName": string; "displayName"?: string; "createdAt"?: string; "updatedAt"?: string }
 
