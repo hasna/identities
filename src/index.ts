@@ -91,6 +91,8 @@ export {
   validateInstructionSources,
 } from "./instructions.js";
 export {
+  agentOperatingRulesSentinel,
+  agentOperatingRulesVersion,
   createGlobalAgentConfigsInstructionSourceExport,
   createGlobalAgentInstructionSourceExport,
   globalAgentInstructionProviders,

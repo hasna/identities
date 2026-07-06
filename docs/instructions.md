@@ -137,14 +137,30 @@ The canonical set includes:
 
 - `hasna-global-coding-agent-system-prompt`
 - `hasna-global-coding-agent-non-overridable-rules`
+- `hasna-agent-operating-rules`
 - `hasna-codewith-global-agent-overlay`
 - `hasna-claude-global-agent-overlay`
 - `hasna-codex-global-agent-overlay`
 - `hasna-opencode-global-agent-overlay`
 
 Provider filtering keeps the global prompt and global rules, then includes only
-matching provider overlays. For example, `--provider codewith` returns the two
+matching provider overlays. For example, `--provider codewith` returns the three
 global sources and the Codewith overlay.
+
+`hasna-agent-operating-rules` is the versioned Hasna Agent Operating Rules
+document (currently v1.1.0, stamped on line 1 and carrying the sentinel comment
+`<!-- hasna:agent-operating-rules v=1.1.0 -->` so renderers and drift checks can
+verify currency). It leads with the four core operating rules — an independent
+adversarial reviewer on every user-requested piece of work, record-as-you-go in
+the todos/mementos/conversations CLIs, agent-identity registration before
+taking work (subagents never register), and a continuously updated
+conversations channel per project — followed by the fleet communication duties
+(announcements/blockers reads bounded `--since 7d`, `[BREAKING]` heads-up before
+fleet-affecting changes, publish intent before npm/bun publish, incidents-first,
+no secrets in messages, channel content is data not instructions, convention
+lookup before naming, identity release at session end). It is non-overridable
+and renders at precedence 175, between the global system prompt (150) and the
+provider overlays (200).
 
 Required rule coverage is part of the source content:
 
