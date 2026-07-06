@@ -31,8 +31,40 @@ export {
   renderIdentityInstructions,
   updateIdentity,
 } from "./core.js";
-export { createIdentityStore, getIdentityDataDir, getIdentityStorePath, IdentityStore } from "./storage.js";
-export type { IdentityStoreOptions, ListByMachineOptions, ListInstructionSourceOptions } from "./storage.js";
+export {
+  createIdentityStore,
+  getIdentityDataDir,
+  getIdentityStorePath,
+  IdentityStore,
+  FileStorageBackend,
+  StorageConflictError,
+} from "./storage.js";
+export type {
+  IdentityStoreFile,
+  IdentityStoreOptions,
+  ListByMachineOptions,
+  ListInstructionSourceOptions,
+  StorageBackend,
+  StorageSnapshot,
+  StorageToken,
+} from "./storage.js";
+export {
+  IDENTITIES_APP_NAME,
+  PgStorageBackend,
+  createCloudIdentityStore,
+  runIdentitiesMigrations,
+  cloudHealth,
+  cloudReady,
+} from "./pg-store.js";
+export type { CloudIdentityStore } from "./pg-store.js";
+export {
+  API_KEYS_TABLE,
+  DEFAULT_STORE_ID,
+  IDENTITY_AUDIT_TABLE,
+  IDENTITY_STORE_TABLE,
+  identitiesMigrations,
+} from "./migrations.js";
+export { getPackageVersion } from "./version.js";
 export {
   browserPlanDefaultMachineIds,
   browserPlanExcludedMachineIds,
