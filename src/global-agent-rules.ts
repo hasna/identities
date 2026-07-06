@@ -13,7 +13,7 @@ import type {
 
 export const globalAgentInstructionSourceSet = {
   id: "hasna-global-agent-rules-standard",
-  version: "2026-07-01",
+  version: "2026-07-05",
   title: "Hasna Global Coding Agent Rules Standard",
 } as const;
 
@@ -34,7 +34,7 @@ const sourceSetMetadata = {
 const provenance = {
   source: "open-identities:global-agent-rules",
   createdAt: "2026-07-01T00:00:00.000Z",
-  updatedAt: "2026-07-01T00:00:00.000Z",
+  updatedAt: "2026-07-05T00:00:00.000Z",
 } as const;
 
 const globalProviderCompatibility: InstructionProviderCompatibility[] = [
@@ -120,7 +120,13 @@ export const globalAgentInstructionSourceInputs: InstructionSourceInput[] = [
       "",
       "Use the Todos CLI and todos plans for planning, task state, comments, commits, verification evidence, and handoff notes. Use Mementos, Conversations, and Projects CLIs as their domain source of truth where memory, coordination, or project registry state is involved.",
       "",
+      "For non-trivial work, first create or reuse a Todos CLI plan and concrete tasks before execution. Keep Codewith goal-plan steps descriptive and include the relevant Todos plan and task IDs in each goal or goal-step description where practical.",
+      "",
       "Coordinator sessions route implementation through subagents and task workflows. A coordinator may inspect, plan, review, and record evidence, but it must not write product code directly unless the task explicitly assigns implementation to that session.",
+      "",
+      "When spawning adversarial agents or reviewers, instruct them to report through Conversations CLI in the proper project channel. If no suitable channel exists, create a project-specific channel or a channel with a clear project suffix, then post the review there.",
+      "",
+      "Coordinators and delegated agents must record operational state in Todos CLI, Conversations CLI, and Mementos CLI. Use Todos for plan/task status and evidence, Conversations for activity/channel reporting, and Mementos for durable operational rules or short-term commitments.",
       "",
       "When a dispatch, package, or automation path fails, self-heal the owning package instead of bypassing it. Pull or inspect the owning repository, fix the CLI or SDK behavior, publish or prepare the package update as required, update affected machines, and record evidence. Do not fall back to tmux prompt paste unless a human explicitly authorizes that emergency path.",
       "",
@@ -153,13 +159,16 @@ export const globalAgentInstructionSourceInputs: InstructionSourceInput[] = [
       "1. Knowledge belongs in the Knowledge CLI or SDK. Do not use ad hoc global Markdown under $HOME/.hasna, $HOME/.husna, or similar home-level paths as a replacement for the knowledge system.",
       "2. Planning and evidence belong in Todos CLI tasks and todos plans. Keep task status, comments, commits, verification commands, and handoff evidence current.",
       "3. Mementos, Conversations, and Projects CLIs are the source of truth for memory, team coordination, and project registry state when those domains apply.",
-      "4. Coordinator sessions do not write product code directly. They delegate implementation through subagents or task workflows and then inspect, review, and coordinate the result.",
-      "5. Codewith native loops are Codewith-native scheduled or recurring sessions, including /loop and built-in loop tools. OpenLoops is a separate orchestration package and daemon. Use the correct term and mechanism.",
-      "6. Dispatch failure requires self-healing. Do not use tmux prompt paste as a fallback unless explicitly authorized. Fix the owning package or route, publish or prepare the update, update affected machines, and record evidence.",
-      "7. Minimum adversarial verification is required for non-trivial changes. Use a fresh adversarial reviewer when available; otherwise perform and label an adversarial self-review, then reconcile findings.",
-      "8. Secrets safety is mandatory. Never expose credential values. Run the staged secrets scan before every commit and push. Remove any detected credential from the diff before continuing.",
-      "9. Commit messages must not include Co-Authored-By trailers.",
-      "10. Prefer Bun in Hasna JavaScript and TypeScript repositories. Preserve Bun's release-age quarantine and add exact new Hasna package names to the release-age exclusion registry when applicable.",
+      "4. For non-trivial work, first create or reuse a Todos CLI plan and concrete tasks before execution. Keep Codewith goal-plan steps descriptive and include the relevant Todos plan and task IDs in each goal or goal-step description where practical.",
+      "5. When spawning adversarial agents or reviewers, instruct them to report through Conversations CLI in the proper project channel. If no suitable channel exists, create a project-specific channel or a channel with a clear project suffix, then post the review there.",
+      "6. Coordinators and delegated agents must record operational state in Todos CLI, Conversations CLI, and Mementos CLI. Use Todos for plan/task status and evidence, Conversations for activity/channel reporting, and Mementos for durable operational rules or short-term commitments.",
+      "7. Coordinator sessions do not write product code directly. They delegate implementation through subagents or task workflows and then inspect, review, and coordinate the result.",
+      "8. Codewith native loops are Codewith-native scheduled or recurring sessions, including /loop and built-in loop tools. OpenLoops is a separate orchestration package and daemon. Use the correct term and mechanism.",
+      "9. Dispatch failure requires self-healing. Do not use tmux prompt paste as a fallback unless explicitly authorized. Fix the owning package or route, publish or prepare the update, update affected machines, and record evidence.",
+      "10. Minimum adversarial verification is required for non-trivial changes. Use a fresh adversarial reviewer when available; otherwise perform and label an adversarial self-review, then reconcile findings.",
+      "11. Secrets safety is mandatory. Never expose credential values. Run the staged secrets scan before every commit and push. Remove any detected credential from the diff before continuing.",
+      "12. Commit messages must not include Co-Authored-By trailers.",
+      "13. Prefer Bun in Hasna JavaScript and TypeScript repositories. Preserve Bun's release-age quarantine and add exact new Hasna package names to the release-age exclusion registry when applicable.",
     ]),
     owner: { kind: "global", id: "global", name: "Hasna Global Agent Rules" },
     sensitivity: "internal",
@@ -170,6 +179,9 @@ export const globalAgentInstructionSourceInputs: InstructionSourceInput[] = [
       "knowledge:cli-sdk-only",
       "todos:plans-evidence-source-of-truth",
       "state:mementos-conversations-projects-cli",
+      "todos:plan-task-ids-in-goals",
+      "coordination:reviewers-report-in-conversations",
+      "state:record-todos-conversations-mementos",
       "coordination:coordinators-delegate-code",
       "loops:codewith-native-vs-openloops",
       "dispatch:self-heal-no-tmux-fallback",
