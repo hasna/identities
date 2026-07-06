@@ -101,7 +101,6 @@ jobs:
             --cache-from "type=gha" \
             --cache-to "type=gha,mode=max" \
             --tag "${IMAGE}" \
-            --tag "${ECR_URL}:latest" \
             --push \
             .
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
