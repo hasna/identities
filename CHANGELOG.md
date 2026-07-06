@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- Added the `identities-serve` HTTP API: `GET /health`, `/ready`, `/version`, `/openapi.json`, and an API-key-authenticated versioned `/v1` surface for identity CRUD (list, get, create, update, delete), email/phone linking, and contact cards.
+- Added the `identities-mcp` MCP server exposing identity CRUD and link tools over stdio.
+- Added a generated, dependency-free SDK client (`@hasna/identities/sdk`) produced from the serve OpenAPI document, with an `IDENTITIES_API_URL` + `IDENTITIES_API_KEY` self_hosted factory.
+- Added a cloud (Postgres) storage mode (PURE REMOTE per Amendment A1) via the vendored `@hasna/contracts` storage kit, a pluggable `StorageBackend` with optimistic-concurrency tokens, and checksum-guarded migrations with an `identities-serve migrate` runner.
+- Added API-key authentication (`@hasna/contracts/auth`), an ARM64/Bun `Dockerfile`, `docker-compose.yml`, and a `hasna.contract.json` service manifest.
+
 ## 0.1.8
 
 - Added durable identifier renaming: `identities update <target> --identifier scheme:value` changes the unique identifier while keeping the previous identifier as a secondary alias, so old references keep resolving.

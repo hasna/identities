@@ -1,6 +1,6 @@
 {
   "name": "@hasna/identities",
-  "version": "0.1.8",
+  "version": "0.2.0",
   "description": "Open identity records for humans and AI agents",
   "type": "module",
   "main": "dist/src/index.js",
@@ -89,7 +89,7 @@
     "vendor-kit:check": "bunx @hasna/contracts vendor-kit . --check --no-contract",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "verify:release": "bun run typecheck && bun test && bun run build && npm pack --dry-run --ignore-scripts",
+    "verify:release": "bun run typecheck && bun test && bun run vendor-kit:check && bun run build",
     "dev:cli": "bun run src/cli.ts",
     "dev:mcp": "bun run src/mcp/index.ts",
     "dev:serve": "bun run src/server/index.ts",
