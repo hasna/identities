@@ -47,16 +47,50 @@ import type {
 export interface IdentityStoreOptions {
   filePath?: string;
   auditPath?: string;
+  /** Pluggable persistence backend. Defaults to a local JSON file backend. */
+  backend?: StorageBackend;
 }
 
 export interface ListByMachineOptions {
   purpose?: string;
 }
 
-interface IdentityStoreFile {
+export interface IdentityStoreFile {
   version: 1;
   identities: Identity[];
   instructionSources?: InstructionSource[];
+}
+
+/** Opaque optimistic-concurrency token round-tripped between read and write. */
+export type StorageToken = unknown;
+
+export interface StorageSnapshot {
+  store: IdentityStoreFile;
+  token?: StorageToken;
+}
+
+/**
+ * Persistence backend for {@link IdentityStore}. The file backend (default) and
+ * the cloud Postgres backend both implement this. All mutation/normalization
+ * logic lives in {@link IdentityStore} and the core lib; a backend only does IO.
+ */
+export interface StorageBackend {
+  read(): Promise<StorageSnapshot>;
+  /** Persist the whole store. `token` (if given) enables optimistic CAS. */
+  write(store: IdentityStoreFile, token?: StorageToken): Promise<void>;
+  appendAudit(action: string, target: string): Promise<void>;
+}
+
+/** Thrown by a backend when an optimistic-concurrency write loses a race. */
+export class StorageConflictError extends Error {
+  constructor(message = "Store changed concurrently; retry the mutation.") {
+    super(message);
+    this.name = "StorageConflictError";
+  }
+}
+
+function isConflict(error: unknown): error is StorageConflictError {
+  return error instanceof StorageConflictError;
 }
 
 export interface ListInstructionSourceOptions {
@@ -80,14 +114,18 @@ export function getIdentityAuditPath(): string {
   return process.env["OPEN_IDENTITIES_AUDIT"] || join(getIdentityDataDir(), "audit.jsonl");
 }
 
+const storeTokens = new WeakMap<IdentityStoreFile, StorageToken>();
+
 export class IdentityStore {
   readonly filePath: string;
   readonly auditPath: string;
+  private readonly backend: StorageBackend;
   private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(options: IdentityStoreOptions = {}) {
     this.filePath = options.filePath ?? getIdentityStorePath();
     this.auditPath = options.auditPath ?? getIdentityAuditPath();
+    this.backend = options.backend ?? new FileStorageBackend(this.filePath, this.auditPath);
   }
 
   async list(): Promise<Identity[]> {
@@ -234,7 +272,8 @@ export class IdentityStore {
       const store = await this.readStore();
       const next = store.identities.filter((identity) => !matchesIdentity(identity, target));
       if (next.length === store.identities.length) return false;
-      await this.writeStore({ ...store, identities: next });
+      store.identities = next;
+      await this.writeStore(store);
       await this.writeAuditEvent("delete", target);
       return true;
     });
@@ -250,9 +289,10 @@ export class IdentityStore {
       const instructionSources = options.instructionSources === undefined
         ? current.instructionSources
         : normalizeInstructionSources(options.instructionSources);
-      const nextStore = { version: 1 as const, identities: normalized, instructionSources };
-      assertValidInstructionSourceGraph(nextStore);
-      await this.writeStore(nextStore);
+      current.identities = normalized;
+      current.instructionSources = instructionSources;
+      assertValidInstructionSourceGraph(current);
+      await this.writeStore(current);
       await this.writeAuditEvent("replace-all", `${normalized.length}`);
     });
   }
@@ -329,36 +369,17 @@ export class IdentityStore {
   }
 
   private async readStore(): Promise<IdentityStoreFile> {
-    try {
-      const raw = await readFile(this.filePath, "utf8");
-      const parsed = JSON.parse(raw) as IdentityStoreFile;
-      return {
-        version: 1,
-        identities: (parsed.identities ?? []).map(normalizePersistedIdentity),
-        instructionSources: normalizeInstructionSources(parsed.instructionSources),
-      };
-    } catch (error) {
-      if (isNodeError(error) && error.code === "ENOENT") {
-        return { version: 1, identities: [], instructionSources: [] };
-      }
-      throw error;
-    }
+    const snapshot = await this.backend.read();
+    storeTokens.set(snapshot.store, snapshot.token);
+    return snapshot.store;
   }
 
   private async writeStore(store: IdentityStoreFile): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
-    const tempPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tempPath, `${JSON.stringify(store, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    await rename(tempPath, this.filePath);
+    await this.backend.write(store, storeTokens.get(store));
   }
 
   private async writeAuditEvent(action: string, target: string): Promise<void> {
-    await mkdir(dirname(this.auditPath), { recursive: true, mode: 0o700 });
-    await appendFile(
-      this.auditPath,
-      `${JSON.stringify({ action, target, at: new Date().toISOString(), store: this.filePath })}\n`,
-      { encoding: "utf8", mode: 0o600 },
-    );
+    await this.backend.appendAudit(action, target);
   }
 
   private async updateUnlocked(target: string, input: UpdateIdentityInput): Promise<Identity> {
@@ -409,7 +430,16 @@ export class IdentityStore {
 
     await previous.catch(() => undefined);
     try {
-      return await fn();
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        try {
+          return await fn();
+        } catch (error) {
+          if (!isConflict(error)) throw error;
+          lastError = error;
+        }
+      }
+      throw lastError instanceof Error ? lastError : new StorageConflictError();
     } finally {
       release();
     }
@@ -418,6 +448,46 @@ export class IdentityStore {
 
 export function createIdentityStore(options?: IdentityStoreOptions): IdentityStore {
   return new IdentityStore(options);
+}
+
+/** Default backend: an atomic (temp-file + rename) local JSON store + JSONL audit log. */
+export class FileStorageBackend implements StorageBackend {
+  constructor(private readonly filePath: string, private readonly auditPath: string) {}
+
+  async read(): Promise<StorageSnapshot> {
+    try {
+      const raw = await readFile(this.filePath, "utf8");
+      const parsed = JSON.parse(raw) as IdentityStoreFile;
+      return {
+        store: {
+          version: 1,
+          identities: (parsed.identities ?? []).map(normalizePersistedIdentity),
+          instructionSources: normalizeInstructionSources(parsed.instructionSources),
+        },
+      };
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        return { store: { version: 1, identities: [], instructionSources: [] } };
+      }
+      throw error;
+    }
+  }
+
+  async write(store: IdentityStoreFile): Promise<void> {
+    await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
+    const tempPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(tempPath, `${JSON.stringify(store, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    await rename(tempPath, this.filePath);
+  }
+
+  async appendAudit(action: string, target: string): Promise<void> {
+    await mkdir(dirname(this.auditPath), { recursive: true, mode: 0o700 });
+    await appendFile(
+      this.auditPath,
+      `${JSON.stringify({ action, target, at: new Date().toISOString(), store: this.filePath })}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  }
 }
 
 function matchesIdentity(identity: Identity, target: string): boolean {

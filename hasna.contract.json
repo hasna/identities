@@ -1,0 +1,32 @@
+{
+  "schema": "hasna.service_contract.v1",
+  "name": "identities",
+  "class": "service",
+  "contractVersion": "v1",
+  "kitVersion": "0.4.1",
+  "description": "Open identity records for humans and AI agents. CLI + MCP + HTTP API (identities-serve) + generated SDK. Cloud mode (HASNA_IDENTITIES_STORAGE_MODE=cloud) is PURE REMOTE per Amendment A1: all reads/writes hit the shared cloud Postgres directly.",
+  "bins": ["identities", "identities-mcp", "identities-serve"],
+  "storage": {
+    "mode": "cloud",
+    "envPrefix": "HASNA_IDENTITIES_",
+    "aliasEnvPrefix": "IDENTITIES_",
+    "databaseUrlSecretRef": "hasna/oss/identities/database-url",
+    "sqlitePath": "~/.hasna/identities/identities.json"
+  },
+  "metadata": {
+    "service": {
+      "port": 8080,
+      "healthPath": "/health",
+      "readyPath": "/ready",
+      "versionPath": "/version",
+      "openapiPath": "/openapi.json",
+      "apiVersion": "v1",
+      "auth": "api-key",
+      "signingSecretSecretRef": "hasna/oss/identities/api-key-signing-secret"
+    },
+    "client": {
+      "apiUrlEnv": "IDENTITIES_API_URL",
+      "apiKeyEnv": "IDENTITIES_API_KEY"
+    }
+  }
+}
