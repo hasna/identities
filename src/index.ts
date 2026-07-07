@@ -58,6 +58,13 @@ export {
 } from "./pg-store.js";
 export type { CloudIdentityStore } from "./pg-store.js";
 export {
+  CloudHttpIdentityStore,
+  CloudHttpError,
+  resolveCloudHttpConfig,
+  resolveIdentityStore,
+} from "./http-store.js";
+export type { CloudHttpConfig } from "./http-store.js";
+export {
   API_KEYS_TABLE,
   DEFAULT_STORE_ID,
   IDENTITY_AUDIT_TABLE,
