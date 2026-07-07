@@ -84,7 +84,7 @@
   ],
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "bun run clean && bun build ./src/index.ts ./src/storage.ts ./src/pg-store.ts ./src/migrations.ts ./src/version.ts ./src/browserplan.ts ./src/integrations.ts ./src/instructions.ts ./src/global-agent-rules.ts ./src/ecosystem.ts ./src/eve.ts ./src/status.ts ./src/media.ts ./src/roster.ts ./src/cli.ts ./src/mcp/index.ts ./src/server/index.ts ./src/sdk/index.ts --outdir dist --target bun --external pg --external @hasna/contracts --external @modelcontextprotocol/sdk --external zod && tsc --emitDeclarationOnly --outDir dist",
+    "build": "bun run clean && bun build ./src/index.ts ./src/storage.ts ./src/http-store.ts ./src/pg-store.ts ./src/migrations.ts ./src/version.ts ./src/browserplan.ts ./src/integrations.ts ./src/instructions.ts ./src/global-agent-rules.ts ./src/ecosystem.ts ./src/eve.ts ./src/status.ts ./src/media.ts ./src/roster.ts ./src/cli.ts ./src/mcp/index.ts ./src/server/index.ts ./src/sdk/index.ts --outdir dist --target bun --external pg --external @hasna/contracts --external @modelcontextprotocol/sdk --external zod && tsc --emitDeclarationOnly --outDir dist",
     "generate:sdk": "bun run scripts/generate-sdk.ts",
     "vendor-kit:check": "bunx @hasna/contracts vendor-kit . --check --no-contract",
     "typecheck": "tsc --noEmit",

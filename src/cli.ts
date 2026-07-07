@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { IdentityStore } from "./storage.js";
+import { resolveIdentityStore } from "./http-store.js";
 import { getIdentityStoreStatus, projectIdentityMediaStatus, projectIdentityMediaSummary, type IdentityReferenceStatus } from "./status.js";
 import {
   identityDocumentKeys,
@@ -339,9 +340,14 @@ async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean)
 
 function createStoreFromArgs(parsed: ParsedArgs): IdentityStore {
   const filePath = flagValue(parsed, "store");
-  return new IdentityStore({
+  // An explicit --store path forces the local file store (isolation / tests).
+  // Otherwise, when HASNA_IDENTITIES_API_URL + HASNA_IDENTITIES_API_KEY are set
+  // (self_hosted mode), all reads/writes route to the cloud `/v1` API; with the
+  // env unset the local file store is used.
+  return resolveIdentityStore({
     filePath,
     auditPath: flagValue(parsed, "audit") ?? (filePath ? `${filePath}.audit.jsonl` : undefined),
+    preferLocal: Boolean(filePath),
   });
 }
 
