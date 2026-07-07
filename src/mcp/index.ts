@@ -8,9 +8,20 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { createIdentityStore, type IdentityStore } from "../storage.js";
+import { CloudHttpIdentityStore, resolveCloudHttpConfig } from "../http-store.js";
 import { getPackageVersion } from "../version.js";
 
 async function resolveStore(): Promise<{ store: IdentityStore; mode: "cloud" | "local"; close: () => Promise<void> }> {
+  // Locked client architecture: when the self_hosted API env vars
+  // (HASNA_IDENTITIES_API_URL + HASNA_IDENTITIES_API_KEY) are set, route ALL
+  // reads/writes to the cloud `/v1` HTTP API with the bearer key. No DSN on the
+  // client. Unsetting the vars restores the local store.
+  const cloud = resolveCloudHttpConfig();
+  if (cloud) {
+    return { store: new CloudHttpIdentityStore(cloud), mode: "cloud", close: async () => {} };
+  }
+  // Legacy in-VPC server path: raw Postgres DSN is only ever used by the serve
+  // process (in-VPC), never distributed to client machines.
   const mode = (process.env["HASNA_IDENTITIES_STORAGE_MODE"] ?? "local").toLowerCase();
   if (mode === "cloud") {
     // Lazy import so the local path never loads pg.
