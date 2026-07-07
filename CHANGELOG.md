@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Added the versioned `hasna-agent-operating-rules` canonical source: Hasna Agent Operating Rules v1.1.0 (version stamp on line 1, sentinel `<!-- hasna:agent-operating-rules v=1.1.0 -->`), leading with Andrei's four core operating rules (independent adversarial reviewer on every user-requested work item; record-as-you-go in todos/mementos/conversations CLIs; register an agent identity before taking work, subagents never; every project has a continuously updated conversations channel) followed by the fleet communication duties from the fleet comms strategy (todos task 39a68145).
+- Rendered the new source non-overridable at precedence/order 175, between the global system prompt (150) and provider overlays (200), and bumped the canonical source-set version to `2026-07-06`.
+- Exported `agentOperatingRulesVersion` and `agentOperatingRulesSentinel` from the SDK.
+
 ## 0.2.0
 
 - Added the `identities-serve` HTTP API: `GET /health`, `/ready`, `/version`, `/openapi.json`, and an API-key-authenticated versioned `/v1` surface for identity CRUD (list, get, create, update, delete), email/phone linking, and contact cards.

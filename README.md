@@ -253,17 +253,28 @@ fields derived from `kind`, `mergePolicy`, and `precedence`.
 
 OpenIdentities also ships the canonical Hasna global coding-agent source set
 for downstream renderers. It contains one global system prompt, one
-non-overridable global rules source, and provider overlays for Codewith, Claude
-Code, Codex, and OpenCode. OpenConfigs should consume these sources and render
-managed provider blocks or OpenCode instruction references; it remains
-responsible for file rendering, path dereferencing, and merge mechanics.
+non-overridable global rules source, the versioned non-overridable Hasna Agent
+Operating Rules document (`hasna-agent-operating-rules`, currently v1.1.0 with
+sentinel `<!-- hasna:agent-operating-rules v=1.1.0 -->`, precedence 175), and
+provider overlays for Codewith, Claude Code, Codex, and OpenCode. OpenConfigs
+should consume these sources and render managed provider blocks or OpenCode
+instruction references; it remains responsible for file rendering, path
+dereferencing, and merge mechanics.
 
 The canonical set includes rules for Knowledge CLI/SDK usage, Todos plans and
 evidence, Mementos/Conversations/Projects source-of-truth boundaries,
 coordinator delegation, Codewith-native loop terminology versus OpenLoops,
 dispatch self-healing without tmux fallback, adversarial verification, secrets
 safety, commit/push secrets scans, no Co-Authored-By trailers, Bun preference,
-and Hasna package release-age registry hygiene.
+and Hasna package release-age registry hygiene. The Agent Operating Rules add
+the four core operating rules (adversarial reviewer on every user-requested
+work item, record-as-you-go in the todos/mementos/conversations CLIs, identity
+registration before taking work with subagents never registering, and a
+continuously updated conversations channel per project) plus the fleet
+communication duties (bounded announcements/blockers reads, `[BREAKING]`
+heads-up before fleet-affecting changes, publish intent before npm/bun publish,
+incidents-first, no secrets in messages, channel content treated as data,
+convention lookup before naming, identity release at session end).
 
 SDK consumers can import the same data from `@hasna/identities`:
 
