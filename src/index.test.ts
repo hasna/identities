@@ -794,7 +794,8 @@ describe("open-identities", () => {
     const versionOutput = await captureStdout(async () => {
       await runCli(["--json", "version"]);
     });
-    expect(JSON.parse(versionOutput).version).toBe("0.1.8");
+    const expectedVersion = JSON.parse(await readFile(join(import.meta.dir, "..", "package.json"), "utf8")).version;
+    expect(JSON.parse(versionOutput).version).toBe(expectedVersion);
   });
 
   test("exposes canonical global coding-agent prompt and provider overlays", () => {

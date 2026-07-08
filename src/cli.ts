@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { IdentityStore } from "./storage.js";
 import { resolveIdentityStore } from "./http-store.js";
 import { getIdentityStoreStatus, projectIdentityMediaStatus, projectIdentityMediaSummary, type IdentityReferenceStatus } from "./status.js";
+import { getPackageVersion } from "./version.js";
 import {
   identityDocumentKeys,
   type BrowserPlanCoverageReport,
@@ -55,7 +56,7 @@ interface ParsedArgs {
   flags: Map<string, string[]>;
 }
 
-const version = "0.1.8";
+const version = getPackageVersion();
 const booleanFlags = new Set([
   "json",
   "help",
