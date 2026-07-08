@@ -1,35 +1,21 @@
 #!/usr/bin/env bun
 // MCP server for @hasna/identities. Exposes the identity store operations as MCP
-// tools over stdio. Uses the local JSON store by default; when
-// HASNA_IDENTITIES_STORAGE_MODE=cloud it wraps the shared cloud Postgres store
-// (PURE REMOTE per Amendment A1) using the same core-lib logic.
+// tools over stdio. Every tool routes through the shared Store abstraction
+// (resolveIdentityStore): the local JSON store by default, or the HTTPS `/v1`
+// API store (bearer key) when HASNA_IDENTITIES_API_URL + HASNA_IDENTITIES_API_KEY
+// (or HASNA_IDENTITIES_STORAGE_MODE=api) are set. There is NO Postgres DSN on the
+// client — self_hosted/cloud both go through the API store, same as the CLI/SDK.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { createIdentityStore, type IdentityStore } from "../storage.js";
-import { CloudHttpIdentityStore, resolveCloudHttpConfig } from "../http-store.js";
+import type { IdentityStore } from "../storage.js";
+import { CloudHttpIdentityStore, resolveIdentityStore } from "../http-store.js";
 import { getPackageVersion } from "../version.js";
 
-async function resolveStore(): Promise<{ store: IdentityStore; mode: "cloud" | "local"; close: () => Promise<void> }> {
-  // Locked client architecture: when the self_hosted API env vars
-  // (HASNA_IDENTITIES_API_URL + HASNA_IDENTITIES_API_KEY) are set, route ALL
-  // reads/writes to the cloud `/v1` HTTP API with the bearer key. No DSN on the
-  // client. Unsetting the vars restores the local store.
-  const cloud = resolveCloudHttpConfig();
-  if (cloud) {
-    return { store: new CloudHttpIdentityStore(cloud), mode: "cloud", close: async () => {} };
-  }
-  // Legacy in-VPC server path: raw Postgres DSN is only ever used by the serve
-  // process (in-VPC), never distributed to client machines.
-  const mode = (process.env["HASNA_IDENTITIES_STORAGE_MODE"] ?? "local").toLowerCase();
-  if (mode === "cloud") {
-    // Lazy import so the local path never loads pg.
-    const { createCloudIdentityStore } = await import("../pg-store.js");
-    const cloud = createCloudIdentityStore({ applicationName: "identities-mcp" });
-    return { store: cloud.store, mode: "cloud", close: cloud.close };
-  }
-  return { store: createIdentityStore(), mode: "local", close: async () => {} };
+function resolveStore(): { store: IdentityStore; mode: "api" | "local" } {
+  const store = resolveIdentityStore();
+  return { store, mode: store instanceof CloudHttpIdentityStore ? "api" : "local" };
 }
 
 function jsonText(data: unknown) {
@@ -41,7 +27,7 @@ function errorText(message: string) {
 }
 
 async function main(): Promise<void> {
-  const { store } = await resolveStore();
+  const { store } = resolveStore();
   const server = new McpServer({ name: "identities", version: getPackageVersion() });
 
   server.tool(

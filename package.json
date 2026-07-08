@@ -1,6 +1,6 @@
 {
   "name": "@hasna/identities",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Open identity records for humans and AI agents",
   "type": "module",
   "main": "dist/src/index.js",
@@ -131,7 +131,7 @@
     "typescript": "^5.7.3"
   },
   "dependencies": {
-    "@hasna/contracts": "0.4.1",
+    "@hasna/contracts": "0.4.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "pg": "^8.16.3",
     "zod": "^3.24.2"

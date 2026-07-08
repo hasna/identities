@@ -5,7 +5,7 @@
     "": {
       "name": "@hasna/identities",
       "dependencies": {
-        "@hasna/contracts": "0.4.1",
+        "@hasna/contracts": "0.4.2",
         "@modelcontextprotocol/sdk": "^1.29.0",
         "pg": "^8.16.3",
         "zod": "^3.24.2",
@@ -19,7 +19,7 @@
     },
   },
   "packages": {
-    "@hasna/contracts": ["@hasna/contracts@0.4.1", "", { "dependencies": { "commander": "^13.1.0", "zod": "^3.25.76" }, "bin": { "contracts": "dist/cli/index.js", "contracts-cli": "dist/cli/index.js" } }, "sha512-oubsu1FFyVvxbt5d+85iBXEK6M81ZsaeODycoQGZuFNqQ3ecfXFujlQz3cL+NHwHJPVmy4wBGLPcaXcRTjO/IQ=="],
+    "@hasna/contracts": ["@hasna/contracts@0.4.2", "", { "dependencies": { "commander": "^13.1.0", "zod": "^3.25.76" }, "bin": { "contracts": "dist/cli/index.js", "contracts-cli": "dist/cli/index.js" } }, "sha512-xD7ZWQXR+AjYAJVpaMsQ+8V0SABiJSKVeI0B1WbPByYeGz6daDtgyZ6c3q0c2S6uzIEtUxlGHPundr675636ew=="],
 
     "@hono/node-server": ["@hono/node-server@1.19.14", "", { "peerDependencies": { "hono": "^4" } }, "sha512-GwtvgtXxnWsucXvbQXkRgqksiH2Qed37H9xHZocE5sA3N8O8O8/8FA3uclQXxXVzc9XBZuEOMK7+r02FmSpHtw=="],
 
