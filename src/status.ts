@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { identityDocumentKeys, type Identity, type IdentityKind } from "./types.js";
 import { getIdentityAuditPath, getIdentityStorePath, IdentityStore } from "./storage.js";
+import { resolveIdentityStore } from "./http-store.js";
 import {
   HASNA_COMPANY_AGENT_ROSTER_VERSION,
   deprecatedHasnaCompanyAgentIdentifiers,
@@ -116,7 +117,7 @@ export interface IdentityReferenceStatus {
 
 export type IdentityStoreStatus = IdentityReferenceStatus;
 
-export async function getIdentityReferenceStatus(store = new IdentityStore()): Promise<IdentityReferenceStatus> {
+export async function getIdentityReferenceStatus(store: IdentityStore = resolveIdentityStore()): Promise<IdentityReferenceStatus> {
   const identities = await store.list();
   const byKind = Object.fromEntries(IDENTITY_KINDS.map((kind) => [kind, 0])) as Record<IdentityKind, number>;
   const roles = new Set<string>();

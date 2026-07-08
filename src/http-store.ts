@@ -92,19 +92,21 @@ export function resolveCloudHttpConfig(
  *
  * Selection (matches the shared self-host storage standard):
  *  - `HASNA_IDENTITIES_STORAGE_MODE` wins when set:
- *      `local`                                      -> local file store
- *      `api` | `cloud` | `self_hosted` | `remote`   -> api transport (requires URL + KEY)
+ *      `local`                              -> local file store
+ *      `api` | `cloud` | `self_hosted`      -> api transport (requires URL + KEY)
  *  - otherwise the presence of both API_URL + API_KEY selects `api`; else `local`.
  *
- * The raw RDS DSN is NEVER a client transport — `self_hosted` and `cloud` both
- * mean "route to the HTTPS `/v1` API with a bearer key". Only the server process
- * (src/server) talks to Postgres directly.
+ * The only tier words are `local` | `self_hosted` | `cloud` (`api`/`http` are
+ * plain transport aliases). `remote` and `hybrid` are NOT tier words and are
+ * rejected. The raw RDS DSN is NEVER a client transport — `self_hosted` and
+ * `cloud` both mean "route to the HTTPS `/v1` API with a bearer key". Only the
+ * server process (src/server) talks to Postgres directly.
  */
 export function resolveStorageTransport(env: NodeJS.ProcessEnv = process.env): StorageTransport {
   const raw = env[IDENTITIES_STORAGE_MODE_ENV]?.trim().toLowerCase().replace(/-/g, "_");
   if (raw) {
     if (raw === "local") return "local";
-    if (raw === "api" || raw === "http" || raw === "cloud" || raw === "self_hosted" || raw === "remote" || raw === "hybrid") {
+    if (raw === "api" || raw === "http" || raw === "cloud" || raw === "self_hosted") {
       return "api";
     }
     throw new Error(
