@@ -60,10 +60,14 @@ export class CloudHttpError extends Error {
 
 const IDENTITIES_API_URL_ENV = "HASNA_IDENTITIES_API_URL";
 const IDENTITIES_API_KEY_ENV = "HASNA_IDENTITIES_API_KEY";
+const IDENTITIES_STORAGE_MODE_ENV = "HASNA_IDENTITIES_STORAGE_MODE";
+
+/** Client transport selected by the environment. */
+export type StorageTransport = "api" | "local";
 
 /**
  * Resolve the cloud HTTP config from the environment.
- * - both vars set   -> returns config (self_hosted / cloud-http)
+ * - both vars set   -> returns config (api transport; self_hosted or cloud)
  * - neither set     -> returns null (local file store)
  * - exactly one set -> throws (misconfigured; never silently fall back to local)
  */
@@ -75,7 +79,7 @@ export function resolveCloudHttpConfig(
   if (!apiUrl && !apiKey) return null;
   if (!apiUrl || !apiKey) {
     throw new Error(
-      `Cloud (self_hosted) mode requires BOTH ${IDENTITIES_API_URL_ENV} and ${IDENTITIES_API_KEY_ENV}; ` +
+      `API (self_hosted/cloud) mode requires BOTH ${IDENTITIES_API_URL_ENV} and ${IDENTITIES_API_KEY_ENV}; ` +
         `only ${apiUrl ? IDENTITIES_API_URL_ENV : IDENTITIES_API_KEY_ENV} is set. ` +
         `Set both to use the cloud API, or unset both to use the local store.`,
     );
@@ -84,20 +88,57 @@ export function resolveCloudHttpConfig(
 }
 
 /**
- * Resolve the storage backend for the identities CLI/SDK.
- * Returns a cloud HTTP store when self_hosted env vars are present, otherwise a
- * local file store. Pass `preferLocal` (e.g. when `--store` is given) to force
- * the local file store regardless of env.
+ * Resolve which client transport to use from the environment.
+ *
+ * Selection (matches the shared self-host storage standard):
+ *  - `HASNA_IDENTITIES_STORAGE_MODE` wins when set:
+ *      `local`                              -> local file store
+ *      `api` | `cloud` | `self_hosted`      -> api transport (requires URL + KEY)
+ *  - otherwise the presence of both API_URL + API_KEY selects `api`; else `local`.
+ *
+ * The only tier words are `local` | `self_hosted` | `cloud` (`api`/`http` are
+ * plain transport aliases). `remote` and `hybrid` are NOT tier words and are
+ * rejected. The raw RDS DSN is NEVER a client transport — `self_hosted` and
+ * `cloud` both mean "route to the HTTPS `/v1` API with a bearer key". Only the
+ * server process (src/server) talks to Postgres directly.
+ */
+export function resolveStorageTransport(env: NodeJS.ProcessEnv = process.env): StorageTransport {
+  const raw = env[IDENTITIES_STORAGE_MODE_ENV]?.trim().toLowerCase().replace(/-/g, "_");
+  if (raw) {
+    if (raw === "local") return "local";
+    if (raw === "api" || raw === "http" || raw === "cloud" || raw === "self_hosted") {
+      return "api";
+    }
+    throw new Error(
+      `Unknown ${IDENTITIES_STORAGE_MODE_ENV}: '${raw}'. Use 'local' or 'api' (aliases: cloud, self_hosted).`,
+    );
+  }
+  const apiUrl = env[IDENTITIES_API_URL_ENV]?.trim();
+  const apiKey = env[IDENTITIES_API_KEY_ENV]?.trim();
+  return apiUrl || apiKey ? "api" : "local";
+}
+
+/**
+ * Resolve the storage backend for the identities CLI / MCP / SDK.
+ * Returns an {@link CloudHttpIdentityStore} (api transport) when the environment
+ * selects `api`, otherwise a local {@link IdentityStore}. Pass `preferLocal`
+ * (e.g. when `--store` is given) to force the local file store regardless of env.
  */
 export function resolveIdentityStore(
   options: IdentityStoreOptions & { preferLocal?: boolean } = {},
 ): IdentityStore {
   const { preferLocal, ...storeOptions } = options;
-  if (!preferLocal) {
-    const cloud = resolveCloudHttpConfig();
-    if (cloud) return new CloudHttpIdentityStore(cloud, storeOptions);
+  if (preferLocal || resolveStorageTransport() === "local") {
+    return new IdentityStore(storeOptions);
   }
-  return new IdentityStore(storeOptions);
+  const cloud = resolveCloudHttpConfig();
+  if (!cloud) {
+    throw new Error(
+      `${IDENTITIES_STORAGE_MODE_ENV} selects the API transport but ${IDENTITIES_API_URL_ENV} and ` +
+        `${IDENTITIES_API_KEY_ENV} are not set. Set both, or set ${IDENTITIES_STORAGE_MODE_ENV}=local.`,
+    );
+  }
+  return new CloudHttpIdentityStore(cloud, storeOptions);
 }
 
 /** Backend that refuses all local IO — guards against silent local drift. */

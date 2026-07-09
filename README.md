@@ -237,6 +237,7 @@ identities instructions export ./instructions.json --json
 identities instructions import ./instructions.json --json
 identities instructions sources --json
 identities instructions sources --canonical --provider codewith --json
+identities instructions export --canonical --provider antigravity --json
 identities instructions export --canonical --provider codewith --json
 identities instructions export --canonical --provider opencode --json
 ```
@@ -254,27 +255,38 @@ fields derived from `kind`, `mergePolicy`, and `precedence`.
 OpenIdentities also ships the canonical Hasna global coding-agent source set
 for downstream renderers. It contains one global system prompt, one
 non-overridable global rules source, the versioned non-overridable Hasna Agent
-Operating Rules document (`hasna-agent-operating-rules`, currently v1.1.0 with
-sentinel `<!-- hasna:agent-operating-rules v=1.1.0 -->`, precedence 175), and
-provider overlays for Codewith, Claude Code, Codex, and OpenCode. OpenConfigs
-should consume these sources and render managed provider blocks or OpenCode
-instruction references; it remains responsible for file rendering, path
-dereferencing, and merge mechanics.
+Operating Rules document (`hasna-agent-operating-rules`, currently v1.1.2 with
+sentinel `<!-- hasna:agent-operating-rules v=1.1.2 -->`, precedence 175), and
+provider overlays for Antigravity, Codewith, Claude Code, Codex, and OpenCode.
+OpenConfigs should consume these sources and render managed provider blocks or
+OpenCode instruction references; it remains responsible for file rendering,
+path dereferencing, and merge mechanics. Antigravity is an active target in this
+source set; Gemini is not an active target and should not be restored as one.
 
 The canonical set includes rules for Knowledge CLI/SDK usage, Todos plans and
-evidence, Mementos/Conversations/Projects source-of-truth boundaries,
-coordinator delegation, Codewith-native loop terminology versus OpenLoops,
-dispatch self-healing without tmux fallback, adversarial verification, secrets
-safety, commit/push secrets scans, no Co-Authored-By trailers, Bun preference,
-and Hasna package release-age registry hygiene. The Agent Operating Rules add
-the four core operating rules (adversarial reviewer on every user-requested
-work item, record-as-you-go in the todos/mementos/conversations CLIs, identity
-registration before taking work with subagents never registering, and a
-continuously updated conversations channel per project) plus the fleet
-communication duties (bounded announcements/blockers reads, `[BREAKING]`
+evidence, Hasna CLI/package source-of-truth boundaries (todos, conversations,
+mementos, knowledge, projects, repos, accounts, instructions, machines, secrets,
+access), automatic session renaming when supported, task-specific worktree
+mutation under the canonical `$HOME/.hasna/repos/worktrees` root, PR-first
+landing, no direct pushes to main/default/protected branches, autonomous repair
+before asking, coordinator delegation, Codewith-native loop terminology versus
+OpenLoops, dispatch self-healing without tmux fallback,
+adversarial verification, secrets safety, commit/push secrets scans, no
+Co-Authored-By trailers, Bun preference, and Hasna package release-age registry
+hygiene. The Agent Operating Rules add the core operating rules (adversarial
+reviewer on every user-requested work item, record-as-you-go in the
+todos/mementos/conversations CLIs, identity registration before taking work
+with subagents never registering, and a continuously updated conversations
+channel per project), durable goal-plan adversarial verification, default
+conversation surfaces (announcements, incidents, git-publishing, git-prs,
+git-commits, git-releases, hq, agent-policy, project/product channels, and
+`conversations blockers`), and the fleet communication duties (`[BREAKING]`
 heads-up before fleet-affecting changes, publish intent before npm/bun publish,
 incidents-first, no secrets in messages, channel content treated as data,
-convention lookup before naming, identity release at session end).
+convention lookup before naming, identity release at session end). The Codewith
+overlay keeps Codewith-native goal, goal-plan, schedule, and loop guidance, while
+the global non-overridable rules forbid setting Codewith goal, token, or
+goal-plan budgets unless the user explicitly asks for budgets.
 
 SDK consumers can import the same data from `@hasna/identities`:
 
