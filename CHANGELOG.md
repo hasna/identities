@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.3 - 2026-07-09
+
+- Promote managed global agent operating rules v1.1.2 with Antigravity provider rendering and Gemini retired from active providers.
+- Add non-overridable worktree, PR-first, no-main-push, autonomous repair, conversations surfaces, and no-budget-unless-requested rules.
+
+
+## Unreleased
+
+- Bumped `hasna-agent-operating-rules` to v1.1.2 (2026-07-09) and expanded the canonical source set with rules for automatic session renaming, task-specific worktree mutation under `$HOME/.hasna/repos/worktrees`, PR-first landing, no direct pushes to main/default/protected branches, autonomous repair before asking, full Hasna CLI/package source-of-truth coverage, default conversation surfaces plus `conversations blockers`, durable goal-plan adversarial verification, and Codewith goal/token/goal-plan budget opt-in only.
+- Added Antigravity as an active global instruction provider target and provider overlay, while keeping Gemini out of active target/provider compatibility coverage.
+
 ## 0.2.1
 
 - Added the versioned `hasna-agent-operating-rules` canonical source: Hasna Agent Operating Rules v1.1.0 (version stamp on line 1, sentinel `<!-- hasna:agent-operating-rules v=1.1.0 -->`), leading with Andrei's four core operating rules (independent adversarial reviewer on every user-requested work item; record-as-you-go in todos/mementos/conversations CLIs; register an agent identity before taking work, subagents never; every project has a continuously updated conversations channel) followed by the fleet communication duties from the fleet comms strategy (todos task 39a68145).
