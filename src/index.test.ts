@@ -30,6 +30,7 @@ import {
   writeEveAgent,
 } from "./index.js";
 import { runCli } from "./cli.js";
+import { noBrittleHardcodingRule } from "./global-agent-rules.js";
 
 describe("open-identities", () => {
   test("creates identities with document slots", () => {
@@ -821,6 +822,8 @@ describe("open-identities", () => {
       "git:task-specific-worktree-required",
       "git:pr-first-landing",
       "git:no-direct-protected-branch-push",
+      "architecture:no-brittle-hardcoding",
+      "code:no-brittle-hardcoding",
       "autonomy:repair-before-asking",
       "dispatch:self-heal-no-tmux-fallback",
       "verification:minimum-adversarial",
@@ -848,14 +851,17 @@ describe("open-identities", () => {
     expect(operatingRules).toBeDefined();
     expect(operatingRules?.precedence).toBe(175);
     expect(operatingRules?.nonOverridable).toBe(true);
-    expect(operatingRules?.metadata).toMatchObject({ role: "agent-operating-rules", rulesVersion: "1.1.2" });
-    expect(operatingRules?.content?.startsWith("# Hasna Agent Operating Rules — v1.1.2 (2026-07-09)\n")).toBe(true);
+    expect(operatingRules?.metadata).toMatchObject({ role: "agent-operating-rules", rulesVersion: "1.1.3" });
+    expect(operatingRules?.content?.startsWith("# Hasna Agent Operating Rules — v1.1.3 (2026-07-10)\n")).toBe(true);
     expect(operatingRules?.content).toContain(agentOperatingRulesSentinel);
     const authoredLines = (operatingRules?.content ?? "").trimEnd().split("\n");
     expect(authoredLines.length).toBeLessThanOrEqual(55);
 
     const combined = sources.map((source) => source.content ?? "").join("\n");
     const budgetRule = "Do not set Codewith goal, token, or goal-plan budgets unless the user explicitly asks for budgets.";
+    expect(combined).toContain(noBrittleHardcodingRule);
+    expect(combined).toContain("medium and large applications");
+    expect(combined).toContain("temporary compatibility shims are allowed only when scoped, named, and justified");
     expect(combined).toContain("Knowledge CLI or SDK");
     expect(combined).toContain("$HOME/.hasna");
     expect(combined).toContain("$HOME/.husna");
@@ -904,7 +910,9 @@ describe("open-identities", () => {
     expect(codewithSources.some((source) => source.id === "hasna-opencode-global-agent-overlay")).toBe(false);
     expect(codewithSources.some((source) => source.owner.kind === "global")).toBe(true);
     expect(codewithSources.map((source) => source.content ?? "").join("\n")).toContain(budgetRule);
+    expect(codewithSources.map((source) => source.content ?? "").join("\n")).toContain(noBrittleHardcodingRule);
     expect(codewithSources.find((source) => source.id === "hasna-codewith-global-agent-overlay")?.content).not.toContain(budgetRule);
+    expect(codewithSources.find((source) => source.id === "hasna-codewith-global-agent-overlay")?.content).not.toContain(noBrittleHardcodingRule);
 
     const antigravitySources = listGlobalAgentInstructionSources({ providers: ["antigravity"] });
     expect(antigravitySources.map((source) => source.id)).toEqual([
@@ -920,6 +928,7 @@ describe("open-identities", () => {
       }),
     ]));
     expect(antigravitySources.map((source) => source.content ?? "").join("\n")).toContain(budgetRule);
+    expect(antigravitySources.map((source) => source.content ?? "").join("\n")).toContain(noBrittleHardcodingRule);
 
     const geminiSources = listGlobalAgentInstructionSources({ providers: ["gemini"] });
     expect(geminiSources.every((source) => source.owner.kind === "global")).toBe(true);
@@ -948,10 +957,12 @@ describe("open-identities", () => {
       sourceSetVersion: globalAgentInstructionSourceSet.version,
     });
     expect(codewithExport.sources.map((source) => source.content ?? "").join("\n")).toContain(budgetRule);
+    expect(codewithExport.sources.map((source) => source.content ?? "").join("\n")).toContain(noBrittleHardcodingRule);
 
     const antigravityExport = createGlobalAgentInstructionSourceExport({ providers: ["antigravity"] });
     expect(antigravityExport.validation.valid).toBe(true);
     expect(antigravityExport.sources.map((source) => source.content ?? "").join("\n")).toContain(budgetRule);
+    expect(antigravityExport.sources.map((source) => source.content ?? "").join("\n")).toContain(noBrittleHardcodingRule);
 
     const configsExport = createGlobalAgentConfigsInstructionSourceExport({ providers: ["opencode"] });
     expect(configsExport.contract).toBe(configsInstructionExportContract);

@@ -255,8 +255,8 @@ fields derived from `kind`, `mergePolicy`, and `precedence`.
 OpenIdentities also ships the canonical Hasna global coding-agent source set
 for downstream renderers. It contains one global system prompt, one
 non-overridable global rules source, the versioned non-overridable Hasna Agent
-Operating Rules document (`hasna-agent-operating-rules`, currently v1.1.2 with
-sentinel `<!-- hasna:agent-operating-rules v=1.1.2 -->`, precedence 175), and
+Operating Rules document (`hasna-agent-operating-rules`, currently v1.1.3 with
+sentinel `<!-- hasna:agent-operating-rules v=1.1.3 -->`, precedence 175), and
 provider overlays for Antigravity, Codewith, Claude Code, Codex, and OpenCode.
 OpenConfigs should consume these sources and render managed provider blocks or
 OpenCode instruction references; it remains responsible for file rendering,
@@ -268,8 +268,9 @@ evidence, Hasna CLI/package source-of-truth boundaries (todos, conversations,
 mementos, knowledge, projects, repos, accounts, instructions, machines, secrets,
 access), automatic session renaming when supported, task-specific worktree
 mutation under the canonical `$HOME/.hasna/repos/worktrees` root, PR-first
-landing, no direct pushes to main/default/protected branches, autonomous repair
-before asking, coordinator delegation, Codewith-native loop terminology versus
+landing, no direct pushes to main/default/protected branches, no brittle hardcoding when
+source-of-truth or reusable abstractions exist, autonomous repair before asking,
+coordinator delegation, Codewith-native loop terminology versus
 OpenLoops, dispatch self-healing without tmux fallback,
 adversarial verification, secrets safety, commit/push secrets scans, no
 Co-Authored-By trailers, Bun preference, and Hasna package release-age registry
