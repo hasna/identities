@@ -150,8 +150,8 @@ matching provider overlays. For example, `--provider codewith` returns the three
 global sources and the Codewith overlay.
 
 `hasna-agent-operating-rules` is the versioned Hasna Agent Operating Rules
-document (currently v1.1.2, stamped on line 1 and carrying the sentinel comment
-`<!-- hasna:agent-operating-rules v=1.1.2 -->` so renderers and drift checks can
+document (currently v1.1.3, stamped on line 1 and carrying the sentinel comment
+`<!-- hasna:agent-operating-rules v=1.1.3 -->` so renderers and drift checks can
 verify currency). It leads with the core operating rules — an independent
 adversarial reviewer on every user-requested piece of work, record-as-you-go in
 the todos/mementos/conversations CLIs, agent-identity registration before
@@ -179,6 +179,12 @@ Required rule coverage is part of the source content:
   request or prepared pull-request handoff.
 - Agents must not push directly to `main`, default, or protected branches unless
   the user explicitly instructs that exact repo and operation.
+- Agents must not hardcode brittle values, paths, provider names, config,
+  business logic, environment-specific IDs, or one-off mappings when a
+  source-of-truth, schema/config-driven, package-owned, reusable, or cleaner
+  abstraction exists. This is especially strict in medium and large
+  applications; explicit constants, fixtures, tests, and temporary
+  compatibility shims are allowed only when scoped, named, and justified.
 - Agents act autonomously by diagnosing and repairing owning CLIs, packages,
   and workflows before asking the user; ask only for destructive,
   secret-bearing, or user-only decisions.

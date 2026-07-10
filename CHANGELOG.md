@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4 - 2026-07-10
+
+- Promote `hasna-agent-operating-rules` to v1.1.3 and source-set version `2026-07-10` with the mandatory no-brittle-hardcoding rule.
+- Require source-of-truth, schema/config-driven, package-owned, reusable, or cleaner abstractions over hardcoded values, paths, provider names, config, business logic, environment-specific IDs, and one-off mappings, with scoped exceptions for constants, fixtures, tests, and temporary compatibility shims.
+
 ## 0.3.3 - 2026-07-09
 
 - Promote managed global agent operating rules v1.1.2 with Antigravity provider rendering and Gemini retired from active providers.
