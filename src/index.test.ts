@@ -913,6 +913,18 @@ describe("open-identities", () => {
     expect(codewithSources.map((source) => source.content ?? "").join("\n")).toContain(noBrittleHardcodingRule);
     expect(codewithSources.find((source) => source.id === "hasna-codewith-global-agent-overlay")?.content).not.toContain(budgetRule);
     expect(codewithSources.find((source) => source.id === "hasna-codewith-global-agent-overlay")?.content).not.toContain(noBrittleHardcodingRule);
+    const codewithOverlay = codewithSources.find((source) => source.id === "hasna-codewith-global-agent-overlay");
+    expect(codewithOverlay?.content).toContain("heavy Rust and Bazel builds are remote by default, not local");
+    expect(codewithOverlay?.content).toContain("GitHub Actions is the canonical remote validation path");
+    expect(codewithOverlay?.content).toContain("BuildBuddy remote cache/RBE is the Bazel offload path");
+    expect(codewithOverlay?.content).toContain("Local builds are allowed only as explicitly human-approved exceptions");
+    expect(codewithOverlay?.content).toContain("BUILDBUDDY_API_KEY");
+    expect(codewithOverlay?.content).toContain("hasnaxyz/buildbudd/api-key");
+    expect(codewithOverlay?.content).toContain(".github/scripts/run_bazel_with_buildbuddy.py");
+    expect(codewithOverlay?.ruleIds).toEqual(expect.arrayContaining([
+      "provider:codewith:remote-rust-bazel-builds",
+      "provider:codewith:buildbuddy-secret-safety",
+    ]));
 
     const antigravitySources = listGlobalAgentInstructionSources({ providers: ["antigravity"] });
     expect(antigravitySources.map((source) => source.id)).toEqual([
