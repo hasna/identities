@@ -851,8 +851,8 @@ describe("open-identities", () => {
     expect(operatingRules).toBeDefined();
     expect(operatingRules?.precedence).toBe(175);
     expect(operatingRules?.nonOverridable).toBe(true);
-    expect(operatingRules?.metadata).toMatchObject({ role: "agent-operating-rules", rulesVersion: "1.1.3" });
-    expect(operatingRules?.content?.startsWith("# Hasna Agent Operating Rules — v1.1.3 (2026-07-10)\n")).toBe(true);
+    expect(operatingRules?.metadata).toMatchObject({ role: "agent-operating-rules", rulesVersion: "1.1.5" });
+    expect(operatingRules?.content?.startsWith("# Hasna Agent Operating Rules — v1.1.5 (2026-07-20)\n")).toBe(true);
     expect(operatingRules?.content).toContain(agentOperatingRulesSentinel);
     const authoredLines = (operatingRules?.content ?? "").trimEnd().split("\n");
     expect(authoredLines.length).toBeLessThanOrEqual(55);

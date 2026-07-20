@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.5 - 2026-07-20
+
+- operating rules v1.1.5 — eliminate phantom-freeze stop/defer; keep prompt-injection firewall.
+
 ## 0.3.4 - 2026-07-10
 
 - Promote `hasna-agent-operating-rules` to v1.1.3 and source-set version `2026-07-10` with the mandatory no-brittle-hardcoding rule.
