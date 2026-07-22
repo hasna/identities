@@ -184,6 +184,7 @@ See [docs/integrations.md](docs/integrations.md) for the first sync contract.
 See [docs/browserplan.md](docs/browserplan.md) for the BrowserPlan machine, identity, email, and profile reservation contract.
 See [docs/media.md](docs/media.md) for voice and profile image generation.
 See [docs/instructions.md](docs/instructions.md) for the instruction-source schema, precedence, export contract, and fail-closed safety rules.
+See [docs/identity-contract.md](docs/identity-contract.md) for the versioned canonical agent identity, scoped handle/alias resolver, runtime-context, source-lineage mapping, and dry-run migration contracts.
 
 ## Instruction Sources
 

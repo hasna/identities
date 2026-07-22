@@ -17,6 +17,7 @@
 
 ## Unreleased
 
+- Added the versioned canonical agent identity V1 contract with immutable `identity_id` authority, tenant/namespace-scoped handles and additive aliases, typed fail-closed ambiguity, active authoritative fully-qualified source mappings, quarantined similarity candidates, structured `runtime_instance_id` context with external Runtime Coordination lease/fence ownership, a read-only Machines+Projects assignment projection, pure dry-run migration reports, and canonical/legacy read-preference rollback helpers.
 - Bumped `hasna-agent-operating-rules` to v1.1.2 (2026-07-09) and expanded the canonical source set with rules for automatic session renaming, task-specific worktree mutation under `$HOME/.hasna/repos/worktrees`, PR-first landing, no direct pushes to main/default/protected branches, autonomous repair before asking, full Hasna CLI/package source-of-truth coverage, default conversation surfaces plus `conversations blockers`, durable goal-plan adversarial verification, and Codewith goal/token/goal-plan budget opt-in only.
 - Added Antigravity as an active global instruction provider target and provider overlay, while keeping Gemini out of active target/provider compatibility coverage.
 
