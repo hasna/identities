@@ -7,12 +7,20 @@ export const IDENTITY_MACHINE_ASSIGNMENTS_PROJECTION_V1 = "hasna.identities.mach
 export const IDENTITY_MIGRATION_REPORT_CONTRACT_V1 = "hasna.identities.migration-report/v1" as const;
 export const IDENTITY_CONVERGENCE_CANDIDATE_CONTRACT_V1 = "hasna.identities.convergence-candidate/v1" as const;
 export const EXTERNAL_RUNTIME_COORDINATION_AUTHORITY = "external Runtime Coordination" as const;
+export const AGENT_IDENTITY_V1_CONFORMANCE_FIXTURE_ID =
+  "hasna.identities.agent-identity/v1/conformance/1" as const;
+export const AGENT_IDENTITY_V1_CONFORMANCE_FIXTURE_PATH =
+  "docs/fixtures/agent-identity-v1.conformance.json" as const;
+export const AGENT_IDENTITY_V1_CONFORMANCE_FIXTURE_SHA256 =
+  "sha256:2d22e72b7315d0b06b3c67c71674cfd8c2dff552727eea00efb325f52c9420af" as const;
 
 export const IDENTITY_ALIAS_AMBIGUOUS = "IDENTITY_ALIAS_AMBIGUOUS" as const;
-export const IDENTITY_REFERENCE_AMBIGUOUS = "IDENTITY_REFERENCE_AMBIGUOUS" as const;
+/** @deprecated V1 exposes one fail-closed ambiguity code at every external boundary. */
+export const IDENTITY_REFERENCE_AMBIGUOUS = IDENTITY_ALIAS_AMBIGUOUS;
 export const IDENTITY_NOT_FOUND = "IDENTITY_NOT_FOUND" as const;
 
 export const DEFAULT_IDENTITY_READ_PREFERENCE = "canonical_first" as const;
+export const CANARY_IDENTITY_READ_PREFERENCE = "canonical_first" as const;
 export const ROLLBACK_IDENTITY_READ_PREFERENCE = "legacy_first" as const;
 
 export interface IdentityNamespaceV1 {
@@ -39,25 +47,51 @@ export interface IdentityLabelV1 {
   readonly source: string;
 }
 
-export interface IdentitySourceLineageV1 extends IdentityNamespaceV1 {
-  readonly system: string;
-  readonly record_id: string;
+export interface IdentitySourceLineageV1 {
+  readonly source_authority: string;
+  readonly source_tenant_id: string;
+  readonly source_namespace: string;
+  readonly source_entity_type: string;
+  readonly source_record_id: string;
 }
 
 export type IdentitySourceMappingKindV1 = "authoritative" | "imported";
 export type IdentitySourceMappingStatusV1 = "active" | "retired";
+export type IdentitySourceMappingLifecycleActionV1 =
+  | "create"
+  | "unchanged"
+  | "promote"
+  | "correct"
+  | "retire";
+export type IdentitySourceMappingRevisionActionV1 = Exclude<IdentitySourceMappingLifecycleActionV1, "unchanged">;
 
 export interface IdentitySourceMappingV1 {
   readonly source: IdentitySourceLineageV1;
   readonly lineage_key: string;
+  readonly identity_id: string;
   readonly mapping_kind: IdentitySourceMappingKindV1;
   readonly status: IdentitySourceMappingStatusV1;
+  readonly revision: number;
+  readonly lifecycle_action: IdentitySourceMappingRevisionActionV1;
+  readonly evidence: Readonly<Record<string, unknown>>;
 }
 
 export interface IdentitySourceMappingInputV1 {
   readonly source: IdentitySourceLineageV1;
   readonly mapping_kind: IdentitySourceMappingKindV1;
   readonly status?: IdentitySourceMappingStatusV1;
+  readonly evidence?: Readonly<Record<string, unknown>>;
+}
+
+export interface AppendIdentitySourceMappingRevisionInputV1 extends IdentitySourceMappingInputV1 {
+  readonly identity_id: string;
+}
+
+export interface AppendIdentitySourceMappingRevisionResultV1 {
+  readonly action: IdentitySourceMappingLifecycleActionV1;
+  readonly identities: readonly CanonicalAgentIdentityV1[];
+  readonly previous_revision: IdentitySourceMappingV1 | null;
+  readonly current_revision: IdentitySourceMappingV1;
 }
 
 export interface IdentityMachineAssignmentProjectionItemV1 {
@@ -85,6 +119,7 @@ export interface CanonicalAgentIdentityV1 {
   readonly canonical_handle: CanonicalIdentityHandleV1;
   readonly aliases: readonly IdentityAliasV1[];
   readonly labels: readonly IdentityLabelV1[];
+  /** Append-only revisions owned by this identity; current source projection is computed across identities. */
   readonly source_mappings: readonly IdentitySourceMappingV1[];
   readonly machine_assignments?: IdentityMachineAssignmentsProjectionV1;
   readonly metadata: Readonly<Record<string, unknown>>;
@@ -95,7 +130,7 @@ export interface CreateCanonicalAgentIdentityInputV1 {
   readonly canonical_handle: CanonicalIdentityHandleV1;
   readonly aliases?: readonly IdentityAliasV1[];
   readonly labels?: readonly IdentityLabelV1[];
-  readonly source_mappings?: readonly IdentitySourceMappingInputV1[];
+  readonly source_mappings?: readonly (IdentitySourceMappingInputV1 | IdentitySourceMappingV1)[];
   readonly machine_assignments?: IdentityMachineAssignmentsProjectionV1;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
@@ -155,7 +190,7 @@ export type CanonicalIdentityResolutionV1 =
     }
   | {
       readonly status: "ambiguous";
-      readonly code: typeof IDENTITY_ALIAS_AMBIGUOUS | typeof IDENTITY_REFERENCE_AMBIGUOUS;
+      readonly code: typeof IDENTITY_ALIAS_AMBIGUOUS;
       readonly matched_by: CanonicalIdentityReferenceV1["kind"];
       readonly candidate_identity_ids: readonly string[];
       readonly trust: "denied";
@@ -201,11 +236,20 @@ export interface CanonicalIdentityMigrationBindingV1 {
 
 export type IdentityMigrationChangeActionV1 = "create" | "update" | "unchanged" | "blocked";
 
+export interface IdentitySourceMappingTransitionV1 {
+  readonly lineage_key: string;
+  readonly action: IdentitySourceMappingLifecycleActionV1;
+  readonly identity_id: string;
+  readonly previous_revision: number | null;
+  readonly current_revision: number;
+}
+
 export interface IdentityMigrationChangeV1 {
   readonly identity_id: string;
   readonly action: IdentityMigrationChangeActionV1;
   readonly record?: CanonicalAgentIdentityV1;
   readonly reasons: readonly string[];
+  readonly mapping_transitions: readonly IdentitySourceMappingTransitionV1[];
 }
 
 export interface IdentityMigrationIssueV1 {
@@ -299,23 +343,53 @@ export class IdentityAliasCollisionError extends IdentityContractError {
   }
 }
 
+export class IdentityAliasAmbiguousError extends IdentityContractError {
+  readonly code = IDENTITY_ALIAS_AMBIGUOUS;
+  readonly candidate_identity_ids: readonly string[];
+
+  constructor(subject: string, candidateIdentityIds: readonly string[]) {
+    super(`Identity alias or source is ambiguous: ${subject}`);
+    this.name = "IdentityAliasAmbiguousError";
+    this.candidate_identity_ids = [...new Set(candidateIdentityIds)].sort();
+  }
+}
+
 export function createCanonicalAgentIdentity(
   input: CreateCanonicalAgentIdentityInputV1,
 ): CanonicalAgentIdentityV1 {
-  return {
+  const identityId = required(input.identity_id, "identity_id");
+  let identity: CanonicalAgentIdentityV1 = {
     contract: CANONICAL_AGENT_IDENTITY_CONTRACT_V1,
     version: 1,
-    identity_id: required(input.identity_id, "identity_id"),
+    identity_id: identityId,
     kind: "agent",
     canonical_handle: normalizeCanonicalHandle(input.canonical_handle),
     aliases: dedupeAliases(input.aliases ?? []),
     labels: dedupeLabels(input.labels ?? []),
-    source_mappings: dedupeSourceMappings(input.source_mappings ?? []),
+    source_mappings: [],
     machine_assignments: input.machine_assignments
       ? normalizeMachineAssignmentsProjection(input.machine_assignments)
       : undefined,
     metadata: { ...(input.metadata ?? {}) },
   };
+
+  const revisions: IdentitySourceMappingV1[] = [];
+  const proposals: IdentitySourceMappingInputV1[] = [];
+  for (const mapping of input.source_mappings ?? []) {
+    if (isSourceMappingRevision(mapping)) {
+      revisions.push(normalizeSourceMappingRevision(mapping, identityId));
+    } else {
+      proposals.push(mapping);
+    }
+  }
+  identity = { ...identity, source_mappings: sortSourceMappingHistory(revisions) };
+  for (const proposal of proposals) {
+    identity = appendIdentitySourceMappingRevision([identity], {
+      identity_id: identityId,
+      ...proposal,
+    }).identities[0]!;
+  }
+  return identity;
 }
 
 export function updateCanonicalAgentIdentity(
@@ -341,13 +415,94 @@ export function updateCanonicalAgentIdentity(
     canonical_handle: identity.canonical_handle,
     labels: [...identity.labels, ...(update.labels ?? [])],
     aliases: [...identity.aliases, ...(update.aliases ?? [])],
-    source_mappings: [
-      ...identity.source_mappings.map(({ source, mapping_kind, status }) => ({ source, mapping_kind, status })),
-      ...(update.source_mappings ?? []),
-    ],
+    source_mappings: [...identity.source_mappings, ...(update.source_mappings ?? [])],
     machine_assignments: identity.machine_assignments,
     metadata: { ...identity.metadata, ...(update.metadata ?? {}) },
   });
+}
+
+export function appendIdentitySourceMappingRevision(
+  identities: readonly CanonicalAgentIdentityV1[],
+  input: AppendIdentitySourceMappingRevisionInputV1,
+): AppendIdentitySourceMappingRevisionResultV1 {
+  const normalizedIdentities = identities.map((identity) => createCanonicalAgentIdentity({
+    identity_id: identity.identity_id,
+    canonical_handle: identity.canonical_handle,
+    aliases: identity.aliases,
+    labels: identity.labels,
+    source_mappings: identity.source_mappings,
+    machine_assignments: identity.machine_assignments,
+    metadata: identity.metadata,
+  }));
+  const identityId = required(input.identity_id, "source mapping identity_id");
+  const targets = normalizedIdentities.filter((identity) => identity.identity_id === identityId);
+  if (targets.length !== 1) {
+    throw new IdentityContractError(targets.length === 0
+      ? `identity_id not found: ${identityId}`
+      : `duplicate identity_id: ${identityId}`);
+  }
+
+  const source = normalizeSourceLineage(input.source);
+  const lineageKey = sourceLineageKey(source);
+  const history = normalizedIdentities.flatMap((identity) => identity.source_mappings)
+    .filter((revision) => revision.lineage_key === lineageKey);
+  const latest = latestSourceMappingRevisions(history);
+  if (latest.length > 1) {
+    throw new IdentityAliasAmbiguousError(
+      lineageKey,
+      latest.map((revision) => revision.identity_id),
+    );
+  }
+  const previous = latest[0] ?? null;
+  const mappingKind = normalizeSourceMappingKind(input.mapping_kind);
+  const status = normalizeSourceMappingStatus(input.status ?? "active");
+  const evidence = cloneEvidence(input.evidence ?? previous?.evidence ?? {});
+
+  if (
+    previous
+    && previous.identity_id === identityId
+    && previous.mapping_kind === mappingKind
+    && previous.status === status
+    && equivalentJson(previous.evidence, evidence)
+  ) {
+    return {
+      action: "unchanged",
+      identities: normalizedIdentities,
+      previous_revision: previous,
+      current_revision: previous,
+    };
+  }
+
+  const action: IdentitySourceMappingRevisionActionV1 = !previous
+    ? "create"
+    : status === "retired" && previous.status !== "retired"
+      ? "retire"
+      : mappingKind === "authoritative"
+          && status === "active"
+          && previous.identity_id === identityId
+          && (previous.mapping_kind !== "authoritative" || previous.status !== "active")
+        ? "promote"
+        : "correct";
+  const revision: IdentitySourceMappingV1 = {
+    source,
+    lineage_key: lineageKey,
+    identity_id: identityId,
+    mapping_kind: mappingKind,
+    status,
+    revision: (previous?.revision ?? 0) + 1,
+    lifecycle_action: action,
+    evidence,
+  };
+  const updated = normalizedIdentities.map((identity) => identity.identity_id === identityId
+    ? { ...identity, source_mappings: sortSourceMappingHistory([...identity.source_mappings, revision]) }
+    : identity);
+
+  return {
+    action,
+    identities: updated,
+    previous_revision: previous,
+    current_revision: revision,
+  };
 }
 
 export function createIdentityRuntimeContext(
@@ -389,7 +544,7 @@ export function createIdentityDirectory(
     canonical_handle: identity.canonical_handle,
     aliases: identity.aliases,
     labels: identity.labels,
-    source_mappings: identity.source_mappings.map(({ source, mapping_kind, status }) => ({ source, mapping_kind, status })),
+    source_mappings: identity.source_mappings,
     machine_assignments: identity.machine_assignments,
     metadata: identity.metadata,
   }));
@@ -453,6 +608,61 @@ export function resolveCanonicalIdentity(
   identities: readonly CanonicalAgentIdentityV1[],
   reference: CanonicalIdentityReferenceV1,
 ): CanonicalIdentityResolutionV1 {
+  if (reference.kind === "source") {
+    const lineageKey = sourceLineageKey(reference.source);
+    const latest = latestSourceMappingRevisions(identities
+      .flatMap((identity) => identity.source_mappings)
+      .filter((revision) => revision.lineage_key === lineageKey));
+    if (latest.length > 1) {
+      return {
+        status: "ambiguous",
+        code: IDENTITY_ALIAS_AMBIGUOUS,
+        matched_by: "source",
+        candidate_identity_ids: [...new Set(latest.map((revision) => revision.identity_id))].sort(),
+        trust: "denied",
+      };
+    }
+    const mapping = latest[0];
+    if (!mapping) {
+      return {
+        status: "not_found",
+        code: IDENTITY_NOT_FOUND,
+        matched_by: "source",
+        candidate_identity_ids: [],
+        trust: "denied",
+      };
+    }
+    const mappedIdentities = identities.filter((identity) => identity.identity_id === mapping.identity_id);
+    if (mappedIdentities.length !== 1) {
+      if (mappedIdentities.length > 1) {
+        return {
+          status: "ambiguous",
+          code: IDENTITY_ALIAS_AMBIGUOUS,
+          matched_by: "source",
+          candidate_identity_ids: [mapping.identity_id],
+          trust: "denied",
+        };
+      }
+      return {
+        status: "not_found",
+        code: IDENTITY_NOT_FOUND,
+        matched_by: "source",
+        candidate_identity_ids: [],
+        trust: "denied",
+      };
+    }
+    const identity = mappedIdentities[0]!;
+    return {
+      status: "resolved",
+      identity_id: identity.identity_id,
+      identity,
+      matched_by: "source",
+      trust: mapping.mapping_kind === "authoritative" && mapping.status === "active"
+        ? "authoritative"
+        : "non_authoritative",
+    };
+  }
+
   const matches = uniqueByIdentityId(identities.filter((identity) => matchesReference(identity, reference)));
   if (matches.length === 0) {
     return {
@@ -466,9 +676,7 @@ export function resolveCanonicalIdentity(
   if (matches.length > 1) {
     return {
       status: "ambiguous",
-      code: reference.kind === "alias" || reference.kind === "display_name"
-        ? IDENTITY_ALIAS_AMBIGUOUS
-        : IDENTITY_REFERENCE_AMBIGUOUS,
+      code: IDENTITY_ALIAS_AMBIGUOUS,
       matched_by: reference.kind,
       candidate_identity_ids: matches.map((identity) => identity.identity_id).sort(),
       trust: "denied",
@@ -488,10 +696,11 @@ export function resolveCanonicalIdentity(
 export function sourceLineageKey(source: IdentitySourceLineageV1): string {
   const normalized = normalizeSourceLineage(source);
   return JSON.stringify([
-    normalized.system,
-    normalized.tenant_id,
-    normalized.namespace,
-    normalized.record_id,
+    normalized.source_authority,
+    normalized.source_tenant_id,
+    normalized.source_namespace,
+    normalized.source_entity_type,
+    normalized.source_record_id,
   ]);
 }
 
@@ -540,7 +749,7 @@ export function planCanonicalIdentityMigration(
       canonical_handle: identity.canonical_handle,
       aliases: identity.aliases,
       labels: identity.labels,
-      source_mappings: identity.source_mappings.map(({ source, mapping_kind, status }) => ({ source, mapping_kind, status })),
+      source_mappings: identity.source_mappings,
       machine_assignments: identity.machine_assignments,
       metadata: identity.metadata,
     });
@@ -549,6 +758,7 @@ export function planCanonicalIdentityMigration(
     }
     existing.set(normalized.identity_id, normalized);
   }
+  let workingIdentities = [...existing.values()];
 
   const bindings = new Map<string, CanonicalIdentityMigrationBindingV1>();
   for (const binding of input.bindings) {
@@ -570,12 +780,17 @@ export function planCanonicalIdentityMigration(
         message: `Legacy input contains duplicate identity_id ${identityId}`,
         identity_id: identityId,
       });
-      changes.push({ identity_id: identityId, action: "blocked", reasons: ["duplicate legacy identity_id"] });
+      changes.push({
+        identity_id: identityId,
+        action: "blocked",
+        reasons: ["duplicate legacy identity_id"],
+        mapping_transitions: [],
+      });
       continue;
     }
     seenLegacyIds.add(identityId);
 
-    const current = existing.get(identityId);
+    const current = workingIdentities.find((identity) => identity.identity_id === identityId);
     const binding = bindings.get(identityId);
     if (!current && !binding) {
       issues.push({
@@ -584,7 +799,12 @@ export function planCanonicalIdentityMigration(
         message: "New canonical identities require an explicit tenant/namespace-scoped handle binding",
         identity_id: identityId,
       });
-      changes.push({ identity_id: identityId, action: "blocked", reasons: ["missing canonical handle binding"] });
+      changes.push({
+        identity_id: identityId,
+        action: "blocked",
+        reasons: ["missing canonical handle binding"],
+        mapping_transitions: [],
+      });
       continue;
     }
 
@@ -595,38 +815,80 @@ export function planCanonicalIdentityMigration(
         message: "Canonical handles are stable; add the historical value as an alias instead",
         identity_id: identityId,
       });
-      changes.push({ identity_id: identityId, action: "blocked", reasons: ["canonical handle change rejected"] });
+      changes.push({
+        identity_id: identityId,
+        action: "blocked",
+        reasons: ["canonical handle change rejected"],
+        mapping_transitions: [],
+      });
       continue;
     }
 
     const labels = labelsFromLegacyIdentity(legacy);
-    const updatedCurrent = current
-      ? updateCanonicalAgentIdentity(current, {
-          labels,
-          aliases: binding?.aliases,
-          source_mappings: binding?.source_mappings,
-          metadata: binding?.metadata,
-        })
-      : undefined;
-    const record = updatedCurrent
+    const baseRecord = current
       ? createCanonicalAgentIdentity({
-          identity_id: updatedCurrent.identity_id,
-          canonical_handle: updatedCurrent.canonical_handle,
-          labels: updatedCurrent.labels,
-          aliases: updatedCurrent.aliases,
-          source_mappings: updatedCurrent.source_mappings.map(({ source, mapping_kind, status }) => ({ source, mapping_kind, status })),
-          machine_assignments: binding?.machine_assignments ?? updatedCurrent.machine_assignments,
-          metadata: updatedCurrent.metadata,
+          identity_id: current.identity_id,
+          canonical_handle: current.canonical_handle,
+          labels: [...current.labels, ...labels],
+          aliases: [...current.aliases, ...(binding?.aliases ?? [])],
+          source_mappings: current.source_mappings,
+          machine_assignments: binding?.machine_assignments ?? current.machine_assignments,
+          metadata: { ...current.metadata, ...(binding?.metadata ?? {}) },
         })
       : createCanonicalAgentIdentity({
           identity_id: identityId,
           canonical_handle: binding!.canonical_handle,
           labels,
           aliases: binding!.aliases,
-          source_mappings: binding!.source_mappings,
           machine_assignments: binding!.machine_assignments,
           metadata: binding!.metadata,
         });
+    const beforeBinding = workingIdentities;
+    workingIdentities = current
+      ? workingIdentities.map((identity) => identity.identity_id === identityId ? baseRecord : identity)
+      : [...workingIdentities, baseRecord];
+
+    const mappingTransitions: IdentitySourceMappingTransitionV1[] = [];
+    let mappingBlocked = false;
+    for (const mapping of binding?.source_mappings ?? []) {
+      try {
+        const appended = appendIdentitySourceMappingRevision(workingIdentities, {
+          identity_id: identityId,
+          ...mapping,
+        });
+        workingIdentities = [...appended.identities];
+        mappingTransitions.push({
+          lineage_key: appended.current_revision.lineage_key,
+          action: appended.action,
+          identity_id: appended.current_revision.identity_id,
+          previous_revision: appended.previous_revision?.revision ?? null,
+          current_revision: appended.current_revision.revision,
+        });
+      } catch (error) {
+        if (!(error instanceof IdentityAliasAmbiguousError)) throw error;
+        issues.push({
+          severity: "error",
+          code: IDENTITY_ALIAS_AMBIGUOUS,
+          message: error.message,
+          identity_id: identityId,
+          lineage_key: sourceLineageKey(mapping.source),
+        });
+        mappingBlocked = true;
+        break;
+      }
+    }
+    if (mappingBlocked) {
+      workingIdentities = beforeBinding;
+      changes.push({
+        identity_id: identityId,
+        action: "blocked",
+        reasons: ["ambiguous source mapping history"],
+        mapping_transitions: [],
+      });
+      continue;
+    }
+
+    const record = workingIdentities.find((identity) => identity.identity_id === identityId)!;
 
     const action: IdentityMigrationChangeActionV1 = current
       ? equivalentIdentity(current, record) ? "unchanged" : "update"
@@ -635,19 +897,18 @@ export function planCanonicalIdentityMigration(
       identity_id: identityId,
       action,
       record,
-      reasons: action === "create"
-        ? ["create canonical V1 projection"]
+      reasons: [action === "create"
+        ? "create canonical V1 projection"
         : action === "update"
-          ? ["preserve additive labels, aliases, or source mappings"]
-          : ["canonical projection already current"],
+          ? "preserve additive labels, aliases, or source mappings"
+          : "canonical projection already current",
+        ...mappingTransitions.map((transition) => `source mapping ${transition.action}`),
+      ],
+      mapping_transitions: mappingTransitions,
     });
   }
 
-  const resultingIdentities = new Map(existing);
-  for (const change of changes) {
-    if (change.record) resultingIdentities.set(change.identity_id, change.record);
-  }
-  issues.push(...findDirectoryCollisions([...resultingIdentities.values()]));
+  issues.push(...findDirectoryCollisions(workingIdentities));
   const quarantinedCandidates = (input.convergence_candidates ?? []).map(createIdentityConvergenceCandidate);
   const summary = {
     total: changes.length,
@@ -743,27 +1004,69 @@ function normalizeLabel(label: IdentityLabelV1): IdentityLabelV1 {
 
 function normalizeSourceLineage(source: IdentitySourceLineageV1): IdentitySourceLineageV1 {
   return {
-    system: scoped(required(source.system, "source system")),
-    tenant_id: scoped(required(source.tenant_id, "source tenant_id")),
-    namespace: scoped(required(source.namespace, "source namespace")),
-    record_id: required(source.record_id, "source record_id"),
+    source_authority: scoped(required(source.source_authority, "source_authority")),
+    source_tenant_id: scoped(required(source.source_tenant_id, "source_tenant_id")),
+    source_namespace: scoped(required(source.source_namespace, "source_namespace")),
+    source_entity_type: scoped(required(source.source_entity_type, "source_entity_type")),
+    source_record_id: required(source.source_record_id, "source_record_id"),
   };
 }
 
-function normalizeSourceMapping(mapping: IdentitySourceMappingInputV1): IdentitySourceMappingV1 {
-  if (mapping.mapping_kind !== "authoritative" && mapping.mapping_kind !== "imported") {
-    throw new IdentityContractError(`unsupported source mapping kind: ${String(mapping.mapping_kind)}`);
+function normalizeSourceMappingKind(mappingKind: IdentitySourceMappingKindV1): IdentitySourceMappingKindV1 {
+  if (mappingKind !== "authoritative" && mappingKind !== "imported") {
+    throw new IdentityContractError(`unsupported source mapping kind: ${String(mappingKind)}`);
   }
-  const status = mapping.status ?? "active";
+  return mappingKind;
+}
+
+function normalizeSourceMappingStatus(status: IdentitySourceMappingStatusV1): IdentitySourceMappingStatusV1 {
   if (status !== "active" && status !== "retired") {
     throw new IdentityContractError(`unsupported source mapping status: ${String(status)}`);
   }
+  return status;
+}
+
+function isSourceMappingRevision(
+  mapping: IdentitySourceMappingInputV1 | IdentitySourceMappingV1,
+): mapping is IdentitySourceMappingV1 {
+  return Object.hasOwn(mapping, "revision") || Object.hasOwn(mapping, "lifecycle_action");
+}
+
+function normalizeSourceMappingRevision(
+  mapping: IdentitySourceMappingV1,
+  parentIdentityId: string,
+): IdentitySourceMappingV1 {
   const source = normalizeSourceLineage(mapping.source);
+  const lineageKey = sourceLineageKey(source);
+  if (required(mapping.lineage_key, "source mapping lineage_key") !== lineageKey) {
+    throw new IdentityContractError("source mapping lineage_key does not match canonical source lineage");
+  }
+  const identityId = required(mapping.identity_id, "source mapping identity_id");
+  if (identityId !== parentIdentityId) {
+    throw new IdentityContractError(
+      `source mapping revision identity_id ${identityId} does not match parent identity ${parentIdentityId}`,
+    );
+  }
+  if (!Number.isSafeInteger(mapping.revision) || mapping.revision < 1) {
+    throw new IdentityContractError("source mapping revision must be a positive safe integer");
+  }
+  if (
+    mapping.lifecycle_action !== "create"
+    && mapping.lifecycle_action !== "promote"
+    && mapping.lifecycle_action !== "correct"
+    && mapping.lifecycle_action !== "retire"
+  ) {
+    throw new IdentityContractError(`unsupported source mapping lifecycle action: ${String(mapping.lifecycle_action)}`);
+  }
   return {
     source,
-    lineage_key: sourceLineageKey(source),
-    mapping_kind: mapping.mapping_kind,
-    status,
+    lineage_key: lineageKey,
+    identity_id: identityId,
+    mapping_kind: normalizeSourceMappingKind(mapping.mapping_kind),
+    status: normalizeSourceMappingStatus(mapping.status),
+    revision: mapping.revision,
+    lifecycle_action: mapping.lifecycle_action,
+    evidence: cloneEvidence(mapping.evidence),
   };
 }
 
@@ -800,15 +1103,20 @@ function dedupeLabels(labels: readonly IdentityLabelV1[]): IdentityLabelV1[] {
   return dedupeBy(labels.map(normalizeLabel), (label) => JSON.stringify([label.kind, label.value, label.source]));
 }
 
-function dedupeSourceMappings(mappings: readonly IdentitySourceMappingInputV1[]): IdentitySourceMappingV1[] {
-  const currentByLineage = new Map<string, IdentitySourceMappingV1>();
-  for (const mapping of mappings.map(normalizeSourceMapping)) {
-    // Existing mappings are supplied before explicit updates. Replacing the
-    // current projection prevents retirement or promotion requests from being
-    // silently discarded while preserving the fully qualified source lineage.
-    currentByLineage.set(mapping.lineage_key, mapping);
-  }
-  return [...currentByLineage.values()];
+function sortSourceMappingHistory(mappings: readonly IdentitySourceMappingV1[]): IdentitySourceMappingV1[] {
+  return [...mappings].sort((left, right) => {
+    const lineage = left.lineage_key.localeCompare(right.lineage_key, "en-US");
+    if (lineage !== 0) return lineage;
+    return left.revision - right.revision;
+  });
+}
+
+function latestSourceMappingRevisions(
+  history: readonly IdentitySourceMappingV1[],
+): IdentitySourceMappingV1[] {
+  if (history.length === 0) return [];
+  const latestRevision = Math.max(...history.map((mapping) => mapping.revision));
+  return history.filter((mapping) => mapping.revision === latestRevision);
 }
 
 function aliasKey(alias: IdentityAliasV1): string {
@@ -853,8 +1161,7 @@ function matchesReference(identity: CanonicalAgentIdentityV1, reference: Canonic
         label.value.toLocaleLowerCase("en-US") === value;
     });
   }
-  const key = sourceLineageKey(reference.source);
-  return identity.source_mappings.some((mapping) => mapping.lineage_key === key);
+  return false;
 }
 
 function resolutionTrust(
@@ -862,16 +1169,7 @@ function resolutionTrust(
   reference: CanonicalIdentityReferenceV1,
 ): "authoritative" | "non_authoritative" {
   if (reference.kind === "identity_id") return "authoritative";
-  if (reference.kind !== "source") return "non_authoritative";
-
-  const key = sourceLineageKey(reference.source);
-  return identity.source_mappings.some((mapping) => {
-    return mapping.lineage_key === key &&
-      mapping.mapping_kind === "authoritative" &&
-      mapping.status === "active";
-  })
-    ? "authoritative"
-    : "non_authoritative";
+  return "non_authoritative";
 }
 
 function labelsFromLegacyIdentity(identity: Identity): IdentityLabelV1[] {
@@ -892,7 +1190,7 @@ function findDirectoryCollisions(identities: readonly CanonicalAgentIdentityV1[]
   const issues: IdentityMigrationIssueV1[] = [];
   const handles = new Map<string, string>();
   const aliases = new Map<string, string>();
-  const lineages = new Map<string, string>();
+  const histories = new Map<string, IdentitySourceMappingV1[]>();
   for (const identity of identities) {
     const handle = canonicalHandleLookupKey(identity.canonical_handle);
     const handleOwner = handles.get(handle);
@@ -941,18 +1239,28 @@ function findDirectoryCollisions(identities: readonly CanonicalAgentIdentityV1[]
     }
 
     for (const mapping of identity.source_mappings) {
-      const lineageOwner = lineages.get(mapping.lineage_key);
-      if (lineageOwner && lineageOwner !== identity.identity_id) {
-        issues.push({
-          severity: "error",
-          code: "source_lineage_collision",
-          message: `Source lineage is mapped to both ${lineageOwner} and ${identity.identity_id}`,
-          identity_id: identity.identity_id,
-          lineage_key: mapping.lineage_key,
-        });
-      } else {
-        lineages.set(mapping.lineage_key, identity.identity_id);
-      }
+      const history = histories.get(mapping.lineage_key) ?? [];
+      history.push(mapping);
+      histories.set(mapping.lineage_key, history);
+    }
+  }
+
+  for (const [lineageKey, history] of histories) {
+    const revisions = new Map<number, IdentitySourceMappingV1[]>();
+    for (const mapping of history) {
+      const matches = revisions.get(mapping.revision) ?? [];
+      matches.push(mapping);
+      revisions.set(mapping.revision, matches);
+    }
+    const duplicateRevision = [...revisions.values()].find((matches) => matches.length > 1);
+    if (duplicateRevision) {
+      issues.push({
+        severity: "error",
+        code: IDENTITY_ALIAS_AMBIGUOUS,
+        message: `Source lineage has multiple mappings at revision ${duplicateRevision[0]!.revision}`,
+        identity_id: duplicateRevision[0]!.identity_id,
+        lineage_key: lineageKey,
+      });
     }
   }
   return issues;
@@ -981,7 +1289,36 @@ function dedupeBy<T>(values: readonly T[], keyFor: (value: T) => string): T[] {
   return result;
 }
 
-function required(value: string, label: string): string {
+function cloneEvidence(evidence: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  try {
+    return deepFreeze(structuredClone(evidence));
+  } catch {
+    throw new IdentityContractError("source mapping evidence must be structured-clone compatible");
+  }
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function equivalentJson(left: unknown, right: unknown): boolean {
+  return stableJson(left) === stableJson(right);
+}
+
+function stableJson(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+}
+
+function required(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new IdentityContractError(`${label} cannot be empty`);
   const normalized = value.trim();
   if (!normalized) throw new IdentityContractError(`${label} cannot be empty`);
   return normalized;

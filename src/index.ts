@@ -80,7 +80,11 @@ export {
 } from "./browserplan.js";
 export { createAgentIdentityRef, createEcosystemRegistrationManifest } from "./ecosystem.js";
 export {
+  AGENT_IDENTITY_V1_CONFORMANCE_FIXTURE_ID,
+  AGENT_IDENTITY_V1_CONFORMANCE_FIXTURE_PATH,
+  AGENT_IDENTITY_V1_CONFORMANCE_FIXTURE_SHA256,
   CANONICAL_AGENT_IDENTITY_CONTRACT_V1,
+  CANARY_IDENTITY_READ_PREFERENCE,
   DEFAULT_IDENTITY_READ_PREFERENCE,
   EXTERNAL_RUNTIME_COORDINATION_AUTHORITY,
   IDENTITY_ALIAS_AMBIGUOUS,
@@ -92,10 +96,12 @@ export {
   IDENTITY_REFERENCE_AMBIGUOUS,
   IDENTITY_RUNTIME_CONTEXT_CONTRACT_V1,
   ROLLBACK_IDENTITY_READ_PREFERENCE,
+  IdentityAliasAmbiguousError,
   IdentityAliasCollisionError,
   IdentityContractError,
   IdentityDirectoryConflictError,
   addIdentityAlias,
+  appendIdentitySourceMappingRevision,
   canonicalHandleKey,
   createCanonicalAgentIdentity,
   createIdentityConvergenceCandidate,
@@ -108,6 +114,8 @@ export {
   updateCanonicalAgentIdentity,
 } from "./identity-contract.js";
 export type {
+  AppendIdentitySourceMappingRevisionInputV1,
+  AppendIdentitySourceMappingRevisionResultV1,
   CanonicalAgentIdentityUpdateV1,
   CanonicalAgentIdentityV1,
   CanonicalIdentityDirectoryV1,
@@ -135,6 +143,9 @@ export type {
   IdentityRuntimeContextRefV1,
   IdentityRuntimeContextV1,
   IdentitySourceLineageV1,
+  IdentitySourceMappingLifecycleActionV1,
+  IdentitySourceMappingRevisionActionV1,
+  IdentitySourceMappingTransitionV1,
   IdentitySourceMappingInputV1,
   IdentitySourceMappingKindV1,
   IdentitySourceMappingStatusV1,

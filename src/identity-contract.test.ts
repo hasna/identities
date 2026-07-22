@@ -163,31 +163,35 @@ describe("canonical agent identity contract v1", () => {
 
   test("keys convergence mappings by fully qualified source lineage", () => {
     const todosSource = {
-      system: "todos",
-      tenant_id: "tenant-acme",
-      namespace: "agents",
-      record_id: "local-agent-17",
+      source_authority: "todos",
+      source_tenant_id: "tenant-acme",
+      source_namespace: "agents",
+      source_entity_type: "agent",
+      source_record_id: "local-agent-17",
     };
     const importedSource = {
-      system: "conversations",
-      tenant_id: "tenant-acme",
-      namespace: "agents",
-      record_id: "local-agent-17",
+      source_authority: "conversations",
+      source_tenant_id: "tenant-acme",
+      source_namespace: "agents",
+      source_entity_type: "agent",
+      source_record_id: "local-agent-17",
     };
     const retiredSource = {
-      system: "mementos",
-      tenant_id: "tenant-acme",
-      namespace: "agents",
-      record_id: "historical-agent-17",
+      source_authority: "mementos",
+      source_tenant_id: "tenant-acme",
+      source_namespace: "agents",
+      source_entity_type: "agent",
+      source_record_id: "historical-agent-17",
     };
 
     expect(sourceLineageKey(todosSource)).not.toBe(sourceLineageKey(importedSource));
     expect(() => sourceLineageKey({
-      system: "todos",
-      tenant_id: "",
-      namespace: "agents",
-      record_id: "local-agent-17",
-    })).toThrow(/tenant_id cannot be empty/);
+      source_authority: "todos",
+      source_tenant_id: "",
+      source_namespace: "agents",
+      source_entity_type: "agent",
+      source_record_id: "local-agent-17",
+    })).toThrow(/source_tenant_id cannot be empty/);
 
     const identity = createCanonicalAgentIdentity({
       identity_id: "oid_mapped",
@@ -221,20 +225,25 @@ describe("canonical agent identity contract v1", () => {
       sourceLineageKey(todosSource),
       sourceLineageKey(importedSource),
       sourceLineageKey(retiredSource),
-    ]);
-    expect(identity.source_mappings.map((mapping) => mapping.status)).toEqual([
-      "active",
-      "active",
-      "retired",
-    ]);
+    ].sort());
+    expect(identity.source_mappings.map((mapping) => ({
+      lineage_key: mapping.lineage_key,
+      status: mapping.status,
+      revision: mapping.revision,
+    }))).toEqual(expect.arrayContaining([
+      { lineage_key: sourceLineageKey(todosSource), status: "active", revision: 1 },
+      { lineage_key: sourceLineageKey(importedSource), status: "active", revision: 1 },
+      { lineage_key: sourceLineageKey(retiredSource), status: "retired", revision: 1 },
+    ]));
   });
 
   test("applies explicit same-lineage trust transitions and reports retirement in dry-run", () => {
     const source = {
-      system: "todos",
-      tenant_id: "tenant-acme",
-      namespace: "agents",
-      record_id: "transition-agent-17",
+      source_authority: "todos",
+      source_tenant_id: "tenant-acme",
+      source_namespace: "agents",
+      source_entity_type: "agent",
+      source_record_id: "transition-agent-17",
     };
     const imported = createCanonicalAgentIdentity({
       identity_id: "oid_transition",
@@ -247,7 +256,13 @@ describe("canonical agent identity contract v1", () => {
       source_mappings: [{ source, mapping_kind: "authoritative", status: "active" }],
     });
     expect(imported.source_mappings[0]).toMatchObject({ mapping_kind: "imported", status: "active" });
-    expect(promoted.source_mappings[0]).toMatchObject({ mapping_kind: "authoritative", status: "active" });
+    expect(promoted.source_mappings).toHaveLength(2);
+    expect(promoted.source_mappings.at(-1)).toMatchObject({
+      mapping_kind: "authoritative",
+      status: "active",
+      revision: 2,
+      lifecycle_action: "promote",
+    });
     expect(resolveCanonicalIdentity([promoted], { kind: "source", source })).toMatchObject({
       status: "resolved",
       trust: "authoritative",
@@ -256,8 +271,13 @@ describe("canonical agent identity contract v1", () => {
     const retired = updateCanonicalAgentIdentity(promoted, {
       source_mappings: [{ source, mapping_kind: "authoritative", status: "retired" }],
     });
-    expect(retired.source_mappings).toHaveLength(1);
-    expect(retired.source_mappings[0]).toMatchObject({ mapping_kind: "authoritative", status: "retired" });
+    expect(retired.source_mappings).toHaveLength(3);
+    expect(retired.source_mappings.at(-1)).toMatchObject({
+      mapping_kind: "authoritative",
+      status: "retired",
+      revision: 3,
+      lifecycle_action: "retire",
+    });
     expect(resolveCanonicalIdentity([retired], { kind: "source", source })).toMatchObject({
       status: "resolved",
       trust: "non_authoritative",
@@ -280,16 +300,20 @@ describe("canonical agent identity contract v1", () => {
 
     expect(report.writes_applied).toBe(0);
     expect(report.changes[0]?.action).toBe("update");
-    expect(report.changes[0]?.record?.source_mappings[0]?.status).toBe("retired");
+    expect(report.changes[0]?.record?.source_mappings.at(-1)?.status).toBe("retired");
+    expect(report.changes[0]?.mapping_transitions).toEqual([
+      expect.objectContaining({ action: "retire", previous_revision: 2, current_revision: 3 }),
+    ]);
   });
 
   test("quarantines similarity-only convergence candidates", () => {
     const candidate = createIdentityConvergenceCandidate({
       source: {
-        system: "mementos",
-        tenant_id: "tenant-acme",
-        namespace: "agents",
-        record_id: "agent-by-name-only",
+        source_authority: "mementos",
+        source_tenant_id: "tenant-acme",
+        source_namespace: "agents",
+        source_entity_type: "agent",
+        source_record_id: "agent-by-name-only",
       },
       candidate_identity_ids: ["oid_first", "oid_second"],
       signals: ["handle_similarity", "contact_similarity", "name_similarity"],
@@ -356,10 +380,11 @@ describe("canonical agent identity contract v1", () => {
         aliases: [{ ...scope, kind: "legacy_identifier", value: "agent:older-id" }],
         source_mappings: [{
           source: {
-            system: "todos",
-            tenant_id: "tenant-acme",
-            namespace: "agents",
-            record_id: "legacy-agent-row",
+            source_authority: "todos",
+            source_tenant_id: "tenant-acme",
+            source_namespace: "agents",
+            source_entity_type: "agent",
+            source_record_id: "legacy-agent-row",
           },
           mapping_kind: "imported",
         }],

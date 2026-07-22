@@ -15,6 +15,11 @@ The contract identifier is `hasna.identities.agent-identity/v1`.
   They never authorize. A lookup that matches more than one identity returns
   `status: "ambiguous"`, `code: "IDENTITY_ALIAS_AMBIGUOUS"`, and
   `trust: "denied"` without an identity object.
+- Alias, display-label, and fully-qualified source ambiguity use that same
+  external `IDENTITY_ALIAS_AMBIGUOUS` code. Implementations may retain a more
+  specific internal cause, but V1 callers never receive a second incompatible
+  source/reference ambiguity code. The deprecated
+  `IDENTITY_REFERENCE_AMBIGUOUS` export aliases the canonical code value.
 - Resolution has one external trust representation: `trust: "authoritative"`
   or `trust: "non_authoritative"` for a resolved identity, and
   `trust: "denied"` for a failed resolution. Direct `identity_id` lookup and an
@@ -71,20 +76,32 @@ leases, fences, and expiry remain outside `@hasna/identities`.
 Source mappings require the complete source lineage:
 
 ```text
-system + tenant_id + namespace + record_id
+source_authority + source_tenant_id + source_namespace + source_entity_type + source_record_id
 ```
 
-`sourceLineageKey` produces a collision-safe key from all four components.
-Never key convergence by a local ID alone. Source mappings default to
-`status: "active"`; only an active `authoritative` mapping resolves with
-authoritative trust. Retired mappings remain available for historical lookup
-but are non-authoritative. For the same lineage, an explicit later mapping in a
-create, update, or migration binding is the current projection, so promotion or
-retirement is applied instead of being silently ignored; the source lineage
-itself remains preserved. Handle, contact, or name similarity can be
-represented only with `createIdentityConvergenceCandidate`; the separate result
-is always `quarantined`, is never inserted into identity source mappings, and
-never auto-binds during resolution.
+`sourceLineageKey` trims all five fields, lowercases `source_authority`,
+`source_tenant_id`, `source_namespace`, and `source_entity_type` with the
+`en-US` locale, and preserves `source_record_id` case after trimming. It then
+JSON-encodes the normalized values in the order above. Empty fields are
+rejected. There is no V1 four-field lineage type or implicit default for
+`source_entity_type`, because such an adapter cannot map unambiguously.
+
+Source mappings default to `status: "active"`; only the latest unique revision
+of an active `authoritative` mapping resolves with authoritative trust. Mapping
+history is append-only and each revision retains its target `identity_id`,
+mapping kind, status, and immutable evidence. `appendIdentitySourceMappingRevision`
+classifies a proposal as `create`, `unchanged`, `promote`, `correct`, or
+`retire`. `unchanged` appends nothing; every other action appends the next
+revision. Corrections may point the same lineage at a different identity while
+the prior identity and evidence remain intact. Resolution projects the highest
+unique valid revision; competing rows at that revision fail closed with
+`IDENTITY_ALIAS_AMBIGUOUS` rather than selecting arbitrarily. Retired current
+revisions remain available for historical lookup but are non-authoritative.
+
+Never key convergence by a local ID alone. Handle, contact, or name similarity
+can be represented only with `createIdentityConvergenceCandidate`; the separate
+result is always `quarantined`, is never inserted into identity source-mapping
+history, and never auto-binds during resolution.
 
 ## Machines and Projects
 
@@ -107,6 +124,8 @@ field as a second authority.
 reports:
 
 - planned creates, updates, unchanged records, and blocked records;
+- per-lineage `create`, `unchanged`, `promote`, `correct`, and `retire`
+  transitions with previous/current revision numbers;
 - fully qualified mapping, canonical-handle, and alias collisions;
 - quarantined similarity candidates;
 - `writes_applied: 0`; and
@@ -119,6 +138,7 @@ source mappings, and `identity_id` values are preserved additively.
 Use `selectIdentityRead` for an incremental rollout:
 
 - default: `canonical_first` with legacy fallback;
+- canary: `canonical_first` with legacy fallback;
 - rollback: `legacy_first` with canonical fallback;
 - strict verification: `canonical_only` or `legacy_only`.
 
@@ -133,3 +153,20 @@ data.
 
 This foundation does not implement cryptographic identity, runtime leases,
 fencing, deployment, or live data migration.
+
+## Cross-repo conformance fixture
+
+The machine-independent fixture at
+`docs/fixtures/agent-identity-v1.conformance.json` is the vendorable V1 oracle
+for lineage field order and normalization, canonical key encoding, trust,
+ambiguity, lifecycle revisions, default/canary/rollback reads,
+`runtime_instance_id`, and the `external Runtime Coordination` authority label.
+It contains no machine path or network dependency. Consumers should pin:
+
+- fixture ID: `hasna.identities.agent-identity/v1/conformance/1`
+- exported path: `AGENT_IDENTITY_V1_CONFORMANCE_FIXTURE_PATH`
+- exported raw-content fingerprint:
+  `AGENT_IDENTITY_V1_CONFORMANCE_FIXTURE_SHA256`
+
+The JSON fixture is forced to LF line endings so its raw SHA-256 is stable
+across supported checkouts.
