@@ -15,6 +15,7 @@ import {
   InMemoryIdentityLifecycleStore,
   createIdentityLifecycleApi,
   identityLifecycleMigrations,
+  normalizeLoginIdentifier,
   type IdentityPasswordHasher,
   type RegistrationPolicy,
 } from "./user-lifecycle.js";
@@ -41,6 +42,7 @@ beforeAll(async () => {
 class FastPasswordHasher implements IdentityPasswordHasher {
   readonly algorithm = "test-only" as const;
   verifyCalls = 0;
+  dummyHashCalls = 0;
 
   async hash(password: string): Promise<string> {
     return `test$${password}`;
@@ -52,7 +54,30 @@ class FastPasswordHasher implements IdentityPasswordHasher {
   }
 
   async dummyHash(): Promise<string> {
+    this.dummyHashCalls += 1;
     return "test$dummy-password-that-never-matches";
+  }
+}
+
+class GatedPasswordHasher extends FastPasswordHasher {
+  active = 0;
+  maxActive = 0;
+  private releaseGate!: () => void;
+  private readonly gate = new Promise<void>((resolve) => {
+    this.releaseGate = resolve;
+  });
+
+  override async verify(password: string, encoded: string): Promise<boolean> {
+    this.verifyCalls += 1;
+    this.active += 1;
+    this.maxActive = Math.max(this.maxActive, this.active);
+    await this.gate;
+    this.active -= 1;
+    return encoded === `test$${password}`;
+  }
+
+  release(): void {
+    this.releaseGate();
   }
 }
 
@@ -107,7 +132,13 @@ function fixture(
       deliverRecovery: options.recovery,
       deliverVerification: options.verification,
     },
-    defaultScopes: ["runs:read", "runs:write", "identity:read"],
+    defaultScopes: [
+      "runs:read",
+      "runs:write",
+      "identity:read",
+      "identities:invites:manage",
+      "identities:platform:admin",
+    ],
     loginThrottle: {
       maxFailures: 3,
       windowSeconds: 300,
@@ -279,28 +310,44 @@ describe("login, tenancy, and account state", () => {
   });
 
   test("fails closed for disabled and soft-deleted users", async () => {
-    const { service } = fixture("open");
+    const { service } = fixture("invite");
     const admin = await firstAdmin(service);
+    const invite = await service.createInvite({
+      actorAccessToken: admin.accessToken,
+      tenantId: admin.tenant.id,
+      identifier: { kind: "email", value: "member-state@example.test" },
+      role: "member",
+      scopes: ["runs:read"],
+    });
+    const member = await service.signup({
+      identifier: { kind: "email", value: "member-state@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "Member State",
+      inviteToken: invite.token,
+    });
     await service.disableUser({
       actorAccessToken: admin.accessToken,
-      userId: admin.user.id,
+      userId: member.user.id,
     });
     expect(await errorReason(service.login({
-      identifier: { kind: "email", value: "owner@example.test" },
-      password: "correct horse battery staple",
+      identifier: { kind: "email", value: "member-state@example.test" },
+      password: "a sufficiently strong password",
     }))).toBe("invalid_credentials");
-    await service.restoreUser({ userId: admin.user.id });
+    await service.restoreUser({
+      actorAccessToken: admin.accessToken,
+      userId: member.user.id,
+    });
     const restored = await service.login({
-      identifier: { kind: "email", value: "owner@example.test" },
-      password: "correct horse battery staple",
+      identifier: { kind: "email", value: "member-state@example.test" },
+      password: "a sufficiently strong password",
     });
     await service.softDeleteUser({
-      actorAccessToken: restored.accessToken,
-      userId: admin.user.id,
+      actorAccessToken: admin.accessToken,
+      userId: restored.user.id,
     });
     expect(await errorReason(service.login({
-      identifier: { kind: "email", value: "owner@example.test" },
-      password: "correct horse battery staple",
+      identifier: { kind: "email", value: "member-state@example.test" },
+      password: "a sufficiently strong password",
     }))).toBe("invalid_credentials");
   });
 
@@ -391,7 +438,7 @@ describe("session rotation and revocation", () => {
     });
     await service.logoutAll({ accessToken: firstAgain.accessToken });
     await expect(verifier.verify(firstAgain.accessToken)).rejects.toMatchObject({
-      reason: "session_inactive",
+      reason: "token_revoked",
     });
     expect((await verifier.verify(secondSignup.accessToken)).sub).toBe(secondSignup.user.id);
   });
@@ -427,7 +474,7 @@ describe("verification and recovery", () => {
       newPassword: "another secure password",
     }))).toBe("recovery_invalid");
     await expect(verifier.verify(session.accessToken)).rejects.toMatchObject({
-      reason: "session_inactive",
+      reason: "token_revoked",
     });
     const recovered = await service.login({
       identifier: { kind: "email", value: "owner@example.test" },
@@ -547,6 +594,7 @@ describe("lifecycle migrations", () => {
       "identities_0006_user_sessions",
       "identities_0007_user_verification_recovery",
       "identities_0008_user_login_throttle",
+      "identities_0009_user_lifecycle_security",
     ]);
     for (const migration of migrations) {
       expect(migration.up).toContain("IF NOT EXISTS");
@@ -558,11 +606,396 @@ describe("lifecycle migrations", () => {
       .reverse()
       .map((migration) => migration.id);
     expect(rollbackOrder).toEqual([
+      "identities_0009_user_lifecycle_security",
       "identities_0008_user_login_throttle",
       "identities_0007_user_verification_recovery",
       "identities_0006_user_sessions",
       "identities_0005_user_credentials",
       "identities_0004_user_tenancy",
     ]);
+  });
+});
+
+describe("review-A lifecycle security regressions", () => {
+  test("enforces invite role order, management scope, actor scope subset, and tenant allowlist", async () => {
+    const { service, store } = fixture("invite");
+    const owner = await firstAdmin(service);
+
+    expect(await errorReason(service.createInvite({
+      actorAccessToken: owner.accessToken,
+      tenantId: owner.tenant.id,
+      role: "member",
+      scopes: ["root:arbitrary"],
+    }))).toBe("invalid_scope");
+
+    const adminInvite = await service.createInvite({
+      actorAccessToken: owner.accessToken,
+      tenantId: owner.tenant.id,
+      identifier: { kind: "email", value: "limited-admin@example.test" },
+      role: "admin",
+      scopes: ["runs:read"],
+    });
+    const admin = await service.signup({
+      identifier: { kind: "email", value: "limited-admin@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "Limited Admin",
+      inviteToken: adminInvite.token,
+    });
+
+    expect(await errorReason(service.createInvite({
+      actorAccessToken: admin.accessToken,
+      tenantId: owner.tenant.id,
+      role: "owner",
+      scopes: ["runs:read"],
+    }))).toBe("forbidden");
+    expect(await errorReason(service.createInvite({
+      actorAccessToken: admin.accessToken,
+      tenantId: owner.tenant.id,
+      role: "member",
+      scopes: ["runs:read"],
+    }))).toBe("forbidden");
+
+    const pendingInvite = await service.createInvite({
+      actorAccessToken: owner.accessToken,
+      tenantId: owner.tenant.id,
+      identifier: { kind: "email", value: "stale-invite@example.test" },
+      role: "member",
+      scopes: ["runs:read"],
+    });
+    const mutable = store as unknown as {
+      state: { memberships: Array<{ userId: string; tenantId: string; scopes: string[] }> };
+    };
+    const currentOwner = mutable.state.memberships.find(
+      (membership) => membership.userId === owner.user.id && membership.tenantId === owner.tenant.id,
+    )!;
+    currentOwner.scopes = currentOwner.scopes.filter((scope) => scope !== "identities:invites:manage");
+    expect(await errorReason(service.createInvite({
+      actorAccessToken: owner.accessToken,
+      tenantId: owner.tenant.id,
+      role: "member",
+      scopes: ["runs:read"],
+    }))).toBe("forbidden");
+    expect(await errorReason(service.signup({
+      identifier: { kind: "email", value: "stale-invite@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "Stale Invite",
+      inviteToken: pendingInvite.token,
+    }))).toBe("invite_invalid");
+  });
+
+  test("intersects current membership scopes at session creation and refresh and revokes an incompatible family", async () => {
+    const gatedHasher = new GatedPasswordHasher();
+    const creationFixture = fixture("open", { hasher: gatedHasher });
+    const creationAdmin = await firstAdmin(creationFixture.service, "creation-owner@example.test");
+    const creationLogin = creationFixture.service.login({
+      identifier: { kind: "email", value: "creation-owner@example.test" },
+      password: "correct horse battery staple",
+    });
+    for (let turn = 0; turn < 20 && gatedHasher.active === 0; turn += 1) await Promise.resolve();
+    const creationMutable = creationFixture.store as unknown as {
+      state: { memberships: Array<{ userId: string; tenantId: string; scopes: string[] }> };
+    };
+    creationMutable.state.memberships.find(
+      (membership) =>
+        membership.userId === creationAdmin.user.id && membership.tenantId === creationAdmin.tenant.id,
+    )!.scopes = ["runs:read"];
+    gatedHasher.release();
+    expect((await creationLogin).scopes).toEqual(["runs:read"]);
+
+    const { service, store, verifier } = fixture("open");
+    const initial = await firstAdmin(service);
+    const mutable = store as unknown as {
+      state: {
+        memberships: Array<{ userId: string; tenantId: string; scopes: string[] }>;
+      };
+    };
+    const membership = mutable.state.memberships.find(
+      (candidate) => candidate.userId === initial.user.id && candidate.tenantId === initial.tenant.id,
+    )!;
+    membership.scopes = ["runs:read"];
+
+    const narrowed = await service.refresh({ refreshToken: initial.refreshToken });
+    expect(narrowed.scopes).toEqual(["runs:read"]);
+
+    membership.scopes = [];
+    expect(await errorReason(service.refresh({ refreshToken: narrowed.refreshToken }))).toBe("refresh_invalid");
+    await expect(verifier.verify(narrowed.accessToken)).rejects.toMatchObject({
+      reason: "session_inactive",
+    });
+  });
+
+  test("does not let a tenant admin globally disable a multi-tenant owner", async () => {
+    const { service, store, verifier } = fixture("open");
+    const target = await firstAdmin(service);
+    const actorPersonal = await service.signup({
+      identifier: { kind: "email", value: "tenant-admin@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "Tenant Admin",
+    });
+    const mutable = store as unknown as {
+      state: {
+        tenants: Array<{ id: string; slug: string; name: string; createdAt: string; allowedScopes?: string[] }>;
+        memberships: Array<{
+          id: string;
+          userId: string;
+          tenantId: string;
+          role: "owner" | "admin" | "member";
+          scopes: string[];
+          createdAt: string;
+          status?: "active" | "suspended";
+        }>;
+      };
+    };
+    mutable.state.memberships.push({
+      id: "mem_tenant_admin",
+      userId: actorPersonal.user.id,
+      tenantId: target.tenant.id,
+      role: "admin",
+      scopes: ["runs:read", "identities:invites:manage"],
+      status: "active",
+      createdAt: new Date().toISOString(),
+    });
+    mutable.state.tenants.push({
+      id: "ten_second_owner",
+      slug: "second-owner",
+      name: "Second Owner Tenant",
+      allowedScopes: ["runs:read"],
+      createdAt: new Date().toISOString(),
+    });
+    mutable.state.memberships.push({
+      id: "mem_second_owner",
+      userId: target.user.id,
+      tenantId: "ten_second_owner",
+      role: "owner",
+      scopes: ["runs:read"],
+      status: "active",
+      createdAt: new Date().toISOString(),
+    });
+    const actor = await service.login({
+      identifier: { kind: "email", value: "tenant-admin@example.test" },
+      password: "a sufficiently strong password",
+      tenantId: target.tenant.id,
+    });
+
+    expect(await errorReason(service.disableUser({
+      actorAccessToken: actor.accessToken,
+      userId: target.user.id,
+    }))).toBe("forbidden");
+    expect((await verifier.verify(target.accessToken)).sub).toBe(target.user.id);
+
+    const multiTenantMember = await service.signup({
+      identifier: { kind: "email", value: "multi-tenant-member@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "Multi Tenant Member",
+    });
+    mutable.state.memberships.push({
+      id: "mem_multi_tenant_member",
+      userId: multiTenantMember.user.id,
+      tenantId: target.tenant.id,
+      role: "member",
+      scopes: ["runs:read"],
+      status: "active",
+      createdAt: new Date().toISOString(),
+    });
+    const suspended = await service.suspendMembership({
+      actorAccessToken: actor.accessToken,
+      tenantId: target.tenant.id,
+      userId: multiTenantMember.user.id,
+    });
+    expect(suspended.status).toBe("suspended");
+    expect(
+      store.snapshot().users.find((user) => user.id === multiTenantMember.user.id)?.status,
+    ).toBe("active");
+    expect((await verifier.verify(multiTenantMember.accessToken)).sub).toBe(multiTenantMember.user.id);
+
+    const tenantBoundary = fixture("open");
+    await firstAdmin(tenantBoundary.service, "platform-owner@example.test");
+    const personalOwner = await tenantBoundary.service.signup({
+      identifier: { kind: "email", value: "personal-owner@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "Personal Owner",
+    });
+    const lowerTarget = await tenantBoundary.service.signup({
+      identifier: { kind: "email", value: "lower-target@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "Lower Target",
+    });
+    const tenantBoundaryMutable = tenantBoundary.store as unknown as {
+      state: { memberships: Array<{ userId: string; role: "owner" | "admin" | "member" }> };
+    };
+    tenantBoundaryMutable.state.memberships.find(
+      (membership) => membership.userId === lowerTarget.user.id,
+    )!.role = "member";
+    expect(await errorReason(tenantBoundary.service.disableUser({
+      actorAccessToken: personalOwner.accessToken,
+      userId: lowerTarget.user.id,
+    }))).toBe("forbidden");
+  });
+
+  test("atomically revokes issued JTIs and sessions while verification observes current user state", async () => {
+    const { service, store, verifier } = fixture("invite");
+    const owner = await firstAdmin(service);
+    const invite = await service.createInvite({
+      actorAccessToken: owner.accessToken,
+      tenantId: owner.tenant.id,
+      identifier: { kind: "email", value: "atomic-member@example.test" },
+      role: "member",
+      scopes: ["runs:read"],
+    });
+    const member = await service.signup({
+      identifier: { kind: "email", value: "atomic-member@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "Atomic Member",
+      inviteToken: invite.token,
+    });
+
+    await service.disableUser({
+      actorAccessToken: owner.accessToken,
+      userId: member.user.id,
+    });
+    const snapshot = store.snapshot();
+    expect(snapshot.users.find((user) => user.id === member.user.id)?.status).toBe("disabled");
+    expect(
+      snapshot.sessionFamilies
+        .filter((family) => family.userId === member.user.id)
+        .every((family) => family.status !== "active"),
+    ).toBe(true);
+    expect(snapshot.jtiRevocations.some((revocation) => revocation.userId === member.user.id)).toBe(true);
+    await expect(verifier.verify(member.accessToken)).rejects.toMatchObject({
+      reason: "token_revoked",
+    });
+
+    const stateFixture = fixture("open");
+    const stateSession = await firstAdmin(stateFixture.service, "state-check@example.test");
+    const mutable = stateFixture.store as unknown as {
+      state: { users: Array<{ id: string; status: "active" | "disabled" | "deleted" }> };
+    };
+    mutable.state.users.find((user) => user.id === stateSession.user.id)!.status = "disabled";
+    await expect(stateFixture.verifier.verify(stateSession.accessToken)).rejects.toMatchObject({
+      reason: "session_inactive",
+    });
+  });
+
+  test("atomically reserves bounded login work before password verification", async () => {
+    const hasher = new GatedPasswordHasher();
+    const { service } = fixture("open", { hasher });
+    await firstAdmin(service);
+    hasher.verifyCalls = 0;
+    const attempts = Array.from({ length: 6 }, () =>
+      service.login({
+        identifier: { kind: "email", value: "owner@example.test" },
+        password: "wrong",
+        throttleKey: "one-client",
+      }).catch((error) => error),
+    );
+    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+    hasher.release();
+    const results = await Promise.all(attempts);
+    expect(hasher.maxActive).toBeLessThanOrEqual(2);
+    expect(results.some((result) => result instanceof IdentityLifecycleError && result.reason === "rate_limited")).toBe(
+      true,
+    );
+
+    const staleStore = new InMemoryIdentityLifecycleStore({
+      loginThrottles: [{
+        keyHash: "a".repeat(64),
+        failures: 0,
+        windowStartedAt: "2026-01-01T00:00:00.000Z",
+        tokens: 2,
+        lastRefilledAt: "2026-01-01T00:00:00.000Z",
+        inFlight: 2,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }],
+    });
+    expect(
+      await staleStore.reserveAuthAttempt("a".repeat(64), new Date("2026-01-01T00:06:00.000Z"), {
+        maxFailures: 3,
+        windowSeconds: 300,
+        lockSeconds: 300,
+        maxConcurrent: 2,
+      }),
+    ).toBe(true);
+  });
+
+  test("prewarms the dummy hash, equalizes recovery work, throttles by identifier and client, and delivers async", async () => {
+    const hasher = new FastPasswordHasher();
+    let releaseDelivery!: () => void;
+    let deliveryStarted!: () => void;
+    const deliveryGate = new Promise<void>((resolve) => {
+      releaseDelivery = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      deliveryStarted = resolve;
+    });
+    const delivered: string[] = [];
+    const { service } = fixture("open", {
+      hasher,
+      recovery: async ({ token }) => {
+        delivered.push(token);
+        deliveryStarted();
+        await deliveryGate;
+      },
+    });
+    expect(hasher.dummyHashCalls).toBe(1);
+    await firstAdmin(service);
+    hasher.verifyCalls = 0;
+
+    await service.beginRecovery({
+      identifier: { kind: "email", value: "unknown@example.test" },
+      throttleKey: "recovery-client",
+    });
+    expect(hasher.verifyCalls).toBe(1);
+
+    const known = service.beginRecovery({
+      identifier: { kind: "email", value: "OWNER@EXAMPLE.TEST" },
+      throttleKey: "recovery-client",
+    });
+    await started;
+    let resolved = false;
+    void known.then(() => {
+      resolved = true;
+    });
+    for (let turn = 0; turn < 20 && !resolved; turn += 1) await Promise.resolve();
+    const resolvedBeforeDelivery = resolved;
+    releaseDelivery();
+    await known;
+    expect(resolvedBeforeDelivery).toBe(true);
+    expect(hasher.verifyCalls).toBe(2);
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await service.beginRecovery({
+        identifier: {
+          kind: "email",
+          value: attempt % 2 === 0 ? "owner@example.test" : " OWNER@EXAMPLE.TEST ",
+        },
+        throttleKey: "bounded-recovery-client",
+      });
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(delivered.length).toBeLessThanOrEqual(4);
+  });
+
+  test("canonicalizes UTS-46 IDN domains and exposes migration collision audit", async () => {
+    const unicode = normalizeLoginIdentifier({ kind: "email", value: "User@bücher.example" });
+    const ascii = normalizeLoginIdentifier({ kind: "email", value: "user@xn--bcher-kva.example" });
+    expect(unicode).toEqual(ascii);
+
+    const { service, store } = fixture("open");
+    await service.signup({
+      identifier: { kind: "email", value: "User@bücher.example" },
+      password: "a sufficiently strong password",
+      displayName: "Unicode",
+    });
+    expect(await errorReason(service.signup({
+      identifier: { kind: "email", value: "user@xn--bcher-kva.example" },
+      password: "a sufficiently strong password",
+      displayName: "Punycode",
+    }))).toBe("duplicate_identifier");
+    expect(store.snapshot().users).toHaveLength(1);
+
+    const lifecycleModule = await import("./user-lifecycle.js");
+    expect(typeof (lifecycleModule as Record<string, unknown>)["auditLoginIdentifierCanonicalization"]).toBe(
+      "function",
+    );
   });
 });

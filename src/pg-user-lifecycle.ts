@@ -3,7 +3,9 @@ import type { PoolQueryClient, TypedQueryClient } from "./generated/storage-kit/
 import { hashOpaqueClaim, type IdentitySessionFamilyStatus } from "./identity-auth.js";
 import {
   IDENTITY_INVITES_TABLE,
+  IDENTITY_ISSUED_ACCESS_TOKENS_TABLE,
   IDENTITY_JTI_REVOCATIONS_TABLE,
+  IDENTITY_LOGIN_IDENTIFIER_AUDIT_TABLE,
   IDENTITY_LOGIN_IDENTIFIERS_TABLE,
   IDENTITY_LOGIN_THROTTLE_TABLE,
   IDENTITY_MEMBERSHIPS_TABLE,
@@ -14,12 +16,17 @@ import {
   IDENTITY_TENANTS_TABLE,
   IDENTITY_USERS_TABLE,
   IdentityLifecycleError,
+  auditLoginIdentifierCanonicalization,
+  normalizeLoginIdentifier,
   type CreateSessionMutation,
   type IdentityInviteRecord,
   type IdentityJtiRevocationRecord,
   type IdentityLifecycleStore,
   type IdentityLoginThrottleRecord,
+  type IdentityIssuedAccessTokenRecord,
+  type IdentityLoginIdentifierCanonicalizationAudit,
   type IdentityOneTimeTokenRecord,
+  type IdentityThrottlePolicy,
   type IdentityUserRecord,
   type LoginCandidate,
   type LoginIdentifierKind,
@@ -43,6 +50,7 @@ interface TenantRow extends QueryResultRow {
   id: string;
   slug: string;
   name: string;
+  allowed_scopes: unknown;
   created_at: Date | string;
 }
 
@@ -52,9 +60,11 @@ interface MembershipTenantRow extends QueryResultRow {
   user_id: string;
   role: "owner" | "admin" | "member";
   scopes: unknown;
+  status: "active" | "suspended";
   created_at: Date | string;
   tenant_slug: string;
   tenant_name: string;
+  tenant_allowed_scopes: unknown;
   tenant_created_at: Date | string;
 }
 
@@ -77,6 +87,7 @@ interface InviteRow extends QueryResultRow {
   token_hash: string;
   identifier_kind: LoginIdentifierKind | null;
   normalized_identifier: string | null;
+  management_scope: string;
   role: "owner" | "admin" | "member";
   scopes: unknown;
   expires_at: Date | string;
@@ -114,6 +125,7 @@ interface SessionContextRow extends UserRow {
   membership_id: string;
   membership_role: "owner" | "admin" | "member";
   membership_scopes: unknown;
+  membership_status: "active" | "suspended";
   membership_created_at: Date | string;
 }
 
@@ -133,6 +145,10 @@ interface ThrottleRow extends QueryResultRow {
   failures: number;
   window_started_at: Date | string;
   locked_until: Date | string | null;
+  tokens: number | string | null;
+  last_refilled_at: Date | string | null;
+  in_flight: number;
+  updated_at: Date | string | null;
 }
 
 function lifecycleFailure(
@@ -145,6 +161,107 @@ function lifecycleFailure(
 
 export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
   constructor(private readonly client: PoolQueryClient) {}
+
+  async prepare(): Promise<IdentityLoginIdentifierCanonicalizationAudit> {
+    let audit: IdentityLoginIdentifierCanonicalizationAudit;
+    try {
+      audit = await this.client.transaction(async (tx) => {
+        await tx.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+          "hasna-identities-user-registration-v1",
+        ]);
+        const identifiers = await tx.many<{
+          id: string;
+          kind: LoginIdentifierKind;
+          normalized_value: string;
+        }>(
+          `SELECT id, kind, normalized_value
+           FROM ${IDENTITY_LOGIN_IDENTIFIERS_TABLE}
+           WHERE kind = 'email'
+           ORDER BY id
+           FOR UPDATE`,
+        );
+        const result = auditLoginIdentifierCanonicalization(
+          identifiers.map((identifier) => ({
+            id: identifier.id,
+            kind: identifier.kind,
+            normalizedValue: identifier.normalized_value,
+          })),
+        );
+        const auditedAt = new Date().toISOString();
+        for (const entry of result.entries) {
+          await tx.execute(
+            `INSERT INTO ${IDENTITY_LOGIN_IDENTIFIER_AUDIT_TABLE}
+               (identifier_id, previous_value, canonical_value, conflicting_identifier_ids, collision, audited_at)
+             VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+             ON CONFLICT (identifier_id, canonical_value) DO UPDATE SET
+               previous_value = EXCLUDED.previous_value,
+               conflicting_identifier_ids = EXCLUDED.conflicting_identifier_ids,
+               collision = EXCLUDED.collision,
+               audited_at = EXCLUDED.audited_at`,
+            [
+              entry.identifierId,
+              entry.previousValue,
+              entry.canonicalValue,
+              JSON.stringify(entry.conflictingIdentifierIds),
+              entry.conflictingIdentifierIds.length > 0,
+              auditedAt,
+            ],
+          );
+        }
+        if (result.collisions.length === 0) {
+          for (const entry of result.entries) {
+            await tx.execute(
+              `UPDATE ${IDENTITY_LOGIN_IDENTIFIERS_TABLE}
+               SET normalized_value = $2
+               WHERE id = $1`,
+              [entry.identifierId, entry.canonicalValue],
+            );
+          }
+        }
+        const emailInvites = await tx.many<{
+          id: string;
+          normalized_identifier: string;
+        }>(
+          `SELECT id, normalized_identifier
+           FROM ${IDENTITY_INVITES_TABLE}
+           WHERE identifier_kind = 'email' AND normalized_identifier IS NOT NULL
+           FOR UPDATE`,
+        );
+        for (const invite of emailInvites) {
+          const canonical = normalizeLoginIdentifier({
+            kind: "email",
+            value: invite.normalized_identifier,
+          }).value;
+          if (canonical !== invite.normalized_identifier) {
+            await tx.execute(
+              `UPDATE ${IDENTITY_INVITES_TABLE}
+               SET normalized_identifier = $2
+               WHERE id = $1`,
+              [invite.id, canonical],
+            );
+          }
+        }
+        return result;
+      });
+    } catch (error) {
+      if (error instanceof IdentityLifecycleError && error.reason === "invalid_request") {
+        throw lifecycleFailure(
+          "invalid_configuration",
+          "persisted login identifier cannot be canonicalized",
+          500,
+        );
+      }
+      throw error;
+    }
+    if (audit.collisions.length > 0) {
+      throw lifecycleFailure(
+        "invalid_configuration",
+        "canonical login identifier collision requires operator resolution",
+        500,
+      );
+    }
+    return audit;
+  }
 
   async register(input: RegistrationMutation): Promise<RegistrationResult> {
     try {
@@ -182,6 +299,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
             id: input.personalTenant.id,
             slug: input.bootstrapTenant.slug,
             name: input.bootstrapTenant.name,
+            allowedScopes: [...input.personalTenant.allowedScopes ?? input.ownerMembership.scopes],
             createdAt: input.user.createdAt,
           };
           membership = {
@@ -189,6 +307,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
             tenantId: tenant.id,
             userId: input.user.id,
             role: "owner",
+            status: "active",
           };
         } else if (input.policy === "invite" && !input.bootstrapOnly) {
           invite = await tx.get<InviteRow>(
@@ -214,20 +333,55 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
           if (invitedTenant === null) {
             throw lifecycleFailure("invite_invalid", "invite is invalid or expired", 400);
           }
+          const creator = await tx.get<{
+            role: "owner" | "admin" | "member";
+            scopes: unknown;
+            membership_status: "active" | "suspended";
+            user_status: "active" | "disabled" | "deleted";
+          }>(
+            `SELECT
+               membership.role,
+               membership.scopes,
+               membership.status AS membership_status,
+               creator.status AS user_status
+             FROM ${IDENTITY_MEMBERSHIPS_TABLE} membership
+             JOIN ${IDENTITY_USERS_TABLE} creator ON creator.id = membership.user_id
+             WHERE membership.tenant_id = $1 AND membership.user_id = $2
+             FOR UPDATE OF membership, creator`,
+            [invite.tenant_id, invite.created_by_user_id],
+          );
+          const inviteScopes = parseScopes(invite.scopes);
+          if (
+            creator === null ||
+            creator.user_status !== "active" ||
+            creator.membership_status !== "active" ||
+            !roleCanAssign(creator.role, invite.role) ||
+            !parseScopes(creator.scopes).includes(invite.management_scope) ||
+            !scopeSubset(inviteScopes, parseScopes(creator.scopes)) ||
+            !scopeSubset(inviteScopes, parseScopes(invitedTenant.allowed_scopes))
+          ) {
+            throw lifecycleFailure("invite_invalid", "invite is invalid or expired", 400);
+          }
           tenant = mapTenant(invitedTenant);
           membership = {
             ...input.ownerMembership,
             tenantId: tenant.id,
             userId: input.user.id,
             role: invite.role,
-            scopes: parseScopes(invite.scopes),
+            scopes: inviteScopes,
+            status: "active",
           };
         } else {
+          tenant = {
+            ...tenant,
+            allowedScopes: [...tenant.allowedScopes ?? input.ownerMembership.scopes],
+          };
           membership = {
             ...input.ownerMembership,
             tenantId: tenant.id,
             userId: input.user.id,
             role: "owner",
+            status: "active",
           };
         }
 
@@ -239,9 +393,15 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
         );
         if (invite === null) {
           await tx.execute(
-            `INSERT INTO ${IDENTITY_TENANTS_TABLE} (id, slug, name, created_at)
-             VALUES ($1, $2, $3, $4)`,
-            [tenant.id, tenant.slug, tenant.name, tenant.createdAt],
+            `INSERT INTO ${IDENTITY_TENANTS_TABLE} (id, slug, name, allowed_scopes, created_at)
+             VALUES ($1, $2, $3, $4::jsonb, $5)`,
+            [
+              tenant.id,
+              tenant.slug,
+              tenant.name,
+              JSON.stringify(tenant.allowedScopes ?? input.ownerMembership.scopes),
+              tenant.createdAt,
+            ],
           );
         }
         await tx.execute(
@@ -271,15 +431,16 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
         );
         await tx.execute(
           `INSERT INTO ${IDENTITY_MEMBERSHIPS_TABLE}
-             (id, tenant_id, user_id, role, scopes, created_at)
-           VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+             (id, tenant_id, user_id, role, scopes, status, created_at)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
           [
             membership.id,
             membership.tenantId,
             membership.userId,
-            membership.role,
-            JSON.stringify(membership.scopes),
-            membership.createdAt,
+              membership.role,
+              JSON.stringify(membership.scopes),
+              membership.status ?? "active",
+              membership.createdAt,
           ],
         );
         await insertOneTimeToken(tx, input.verification);
@@ -331,6 +492,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
          m.*,
          t.slug AS tenant_slug,
          t.name AS tenant_name,
+         t.allowed_scopes AS tenant_allowed_scopes,
          t.created_at AS tenant_created_at
        FROM ${IDENTITY_MEMBERSHIPS_TABLE} m
        JOIN ${IDENTITY_TENANTS_TABLE} t ON t.id = m.tenant_id
@@ -361,6 +523,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
         id: membership.tenant_id,
         slug: membership.tenant_slug,
         name: membership.tenant_name,
+        allowedScopes: parseScopes(membership.tenant_allowed_scopes),
         createdAt: iso(membership.tenant_created_at),
       })),
     };
@@ -380,6 +543,91 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
       return null;
     }
     return mapThrottle(row);
+  }
+
+  async reserveAuthAttempt(
+    keyHash: string,
+    now: Date,
+    policy: IdentityThrottlePolicy,
+  ): Promise<boolean> {
+    return this.client.transaction(async (tx) => {
+      await tx.execute(
+        `INSERT INTO ${IDENTITY_LOGIN_THROTTLE_TABLE}
+           (key_hash, failures, window_started_at, locked_until, tokens, last_refilled_at, in_flight, updated_at)
+         VALUES ($1, 0, $2, NULL, $3, $2, 0, $2)
+         ON CONFLICT (key_hash) DO NOTHING`,
+        [keyHash, now.toISOString(), policy.maxFailures],
+      );
+      const row = await tx.one<ThrottleRow>(
+        `SELECT * FROM ${IDENTITY_LOGIN_THROTTLE_TABLE}
+         WHERE key_hash = $1
+         FOR UPDATE`,
+        [keyHash],
+      );
+      if (row.locked_until !== null && new Date(row.locked_until) > now) return false;
+      const lastRefilledAt = new Date(row.last_refilled_at ?? row.window_started_at);
+      const elapsedSeconds = Math.max(0, (now.getTime() - lastRefilledAt.getTime()) / 1_000);
+      const refillRate = policy.maxFailures / policy.windowSeconds;
+      const tokens = Math.min(
+        policy.maxFailures,
+        (row.tokens === null ? policy.maxFailures : Number(row.tokens)) + elapsedSeconds * refillRate,
+      );
+      const reservationIsStale =
+        row.updated_at !== null &&
+        new Date(row.updated_at).getTime() <= now.getTime() - policy.windowSeconds * 1_000;
+      const inFlight = reservationIsStale ? 0 : Number(row.in_flight);
+      if (inFlight >= policy.maxConcurrent || tokens < 1) return false;
+      await tx.execute(
+        `UPDATE ${IDENTITY_LOGIN_THROTTLE_TABLE}
+         SET tokens = $2,
+             last_refilled_at = $3,
+             in_flight = $4,
+             updated_at = $3
+         WHERE key_hash = $1`,
+        [keyHash, tokens - 1, now.toISOString(), inFlight + 1],
+      );
+      return true;
+    });
+  }
+
+  async completeAuthAttempt(
+    keyHash: string,
+    now: Date,
+    outcome: "success" | "failure",
+    policy: IdentityThrottlePolicy,
+  ): Promise<void> {
+    await this.client.transaction(async (tx) => {
+      const row = await tx.get<ThrottleRow>(
+        `SELECT * FROM ${IDENTITY_LOGIN_THROTTLE_TABLE}
+         WHERE key_hash = $1
+         FOR UPDATE`,
+        [keyHash],
+      );
+      if (row === null) return;
+      let failures = outcome === "success" ? 0 : Number(row.failures) + 1;
+      let windowStartedAt = iso(row.window_started_at);
+      if (
+        outcome === "failure" &&
+        new Date(row.window_started_at).getTime() < now.getTime() - policy.windowSeconds * 1_000
+      ) {
+        failures = 1;
+        windowStartedAt = now.toISOString();
+      }
+      const lockedUntil =
+        outcome === "failure" && failures >= policy.maxFailures
+          ? new Date(now.getTime() + policy.lockSeconds * 1_000).toISOString()
+          : null;
+      await tx.execute(
+        `UPDATE ${IDENTITY_LOGIN_THROTTLE_TABLE}
+         SET failures = $2,
+             window_started_at = $3,
+             locked_until = $4,
+             in_flight = GREATEST(0, in_flight - 1),
+             updated_at = $5
+         WHERE key_hash = $1`,
+        [keyHash, failures, windowStartedAt, lockedUntil, now.toISOString()],
+      );
+    });
   }
 
   async recordLoginFailure(
@@ -422,25 +670,64 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
     );
   }
 
-  async createInvite(invite: IdentityInviteRecord): Promise<void> {
+  async createInvite(
+    invite: IdentityInviteRecord,
+    authorization?: {
+      actorTokenScopes: readonly string[];
+      inviteManagementScope: string;
+    },
+  ): Promise<void> {
     await this.client.transaction(async (tx) => {
-      const actor = await tx.get<{ ok: boolean }>(
-        `SELECT true AS ok FROM ${IDENTITY_MEMBERSHIPS_TABLE}
-         WHERE tenant_id = $1 AND user_id = $2 AND role IN ('owner', 'admin')`,
+      const actor = await tx.get<{
+        role: "owner" | "admin" | "member";
+        scopes: unknown;
+        membership_status: "active" | "suspended";
+        user_status: "active" | "disabled" | "deleted";
+        allowed_scopes: unknown;
+      }>(
+        `SELECT
+           membership.role,
+           membership.scopes,
+           membership.status AS membership_status,
+           actor_user.status AS user_status,
+           tenant.allowed_scopes
+         FROM ${IDENTITY_MEMBERSHIPS_TABLE} membership
+         JOIN ${IDENTITY_USERS_TABLE} actor_user ON actor_user.id = membership.user_id
+         JOIN ${IDENTITY_TENANTS_TABLE} tenant ON tenant.id = membership.tenant_id
+         WHERE membership.tenant_id = $1 AND membership.user_id = $2
+         FOR UPDATE OF membership, actor_user, tenant`,
         [invite.tenantId, invite.createdByUserId],
       );
-      if (actor === null) throw lifecycleFailure("forbidden", "access denied", 403);
+      if (
+        actor === null ||
+        actor.user_status !== "active" ||
+        actor.membership_status !== "active" ||
+        authorization === undefined ||
+        !authorization.actorTokenScopes.includes(authorization.inviteManagementScope) ||
+        !parseScopes(actor.scopes).includes(authorization.inviteManagementScope) ||
+        !roleCanAssign(actor.role, invite.role)
+      ) {
+        throw lifecycleFailure("forbidden", "access denied", 403);
+      }
+      if (
+        !scopeSubset(invite.scopes, authorization.actorTokenScopes) ||
+        !scopeSubset(invite.scopes, parseScopes(actor.scopes)) ||
+        !scopeSubset(invite.scopes, parseScopes(actor.allowed_scopes))
+      ) {
+        throw lifecycleFailure("invalid_scope", "requested scope is not allowed", 403);
+      }
       await tx.execute(
         `INSERT INTO ${IDENTITY_INVITES_TABLE}
            (id, tenant_id, token_hash, identifier_kind, normalized_identifier,
-            role, scopes, expires_at, created_by_user_id, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)`,
+            management_scope, role, scopes, expires_at, created_by_user_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)`,
         [
           invite.id,
           invite.tenantId,
           invite.tokenHash,
           invite.identifierKind ?? null,
           invite.normalizedIdentifier ?? null,
+          invite.managementScope ?? authorization.inviteManagementScope,
           invite.role,
           JSON.stringify(invite.scopes),
           invite.expiresAt,
@@ -453,15 +740,34 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
 
   async createSession(input: CreateSessionMutation): Promise<void> {
     await this.client.transaction(async (tx) => {
-      const context = await tx.get<{ ok: boolean }>(
-        `SELECT true AS ok
+      const context = await tx.get<{
+        membership_scopes: unknown;
+        membership_status: "active" | "suspended";
+        allowed_scopes: unknown;
+      }>(
+        `SELECT
+           m.scopes AS membership_scopes,
+           m.status AS membership_status,
+           t.allowed_scopes
          FROM ${IDENTITY_USERS_TABLE} u
          JOIN ${IDENTITY_MEMBERSHIPS_TABLE} m
            ON m.user_id = u.id AND m.tenant_id = $2
-         WHERE u.id = $1 AND u.status = 'active'`,
+         JOIN ${IDENTITY_TENANTS_TABLE} t ON t.id = m.tenant_id
+         WHERE u.id = $1 AND u.status = 'active'
+         FOR UPDATE OF u, m, t`,
         [input.family.userId, input.family.tenantId],
       );
-      if (context === null) throw lifecycleFailure("invalid_credentials", "authentication failed", 401);
+      if (context === null || context.membership_status !== "active") {
+        throw lifecycleFailure("invalid_credentials", "authentication failed", 401);
+      }
+      input.family.scopes = intersectScopeSets(
+        input.family.scopes,
+        parseScopes(context.membership_scopes),
+        parseScopes(context.allowed_scopes),
+      );
+      if (input.family.scopes.length === 0) {
+        throw lifecycleFailure("invalid_scope", "requested scope is not allowed", 403);
+      }
       await tx.execute(
         `INSERT INTO ${IDENTITY_SESSION_FAMILIES_TABLE}
            (id, session_hash, user_id, tenant_id, scopes, status, expires_at, created_at, updated_at)
@@ -533,10 +839,12 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
            t.id AS tenant_id,
            t.slug AS tenant_slug,
            t.name AS tenant_name,
+           t.allowed_scopes AS tenant_allowed_scopes,
            t.created_at AS tenant_created_at,
            m.id AS membership_id,
            m.role AS membership_role,
            m.scopes AS membership_scopes,
+           m.status AS membership_status,
            m.created_at AS membership_created_at
          FROM ${IDENTITY_USERS_TABLE} u
          JOIN ${IDENTITY_MEMBERSHIPS_TABLE} m
@@ -545,7 +853,23 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
          WHERE u.id = $1`,
         [row.user_id, row.tenant_id],
       );
-      if (context === null || context.status !== "active") return { kind: "invalid" };
+      const currentScopes =
+        context === null
+          ? []
+          : intersectScopeSets(
+              parseScopes(row.family_scopes),
+              parseScopes(context.membership_scopes),
+              parseScopes(context.tenant_allowed_scopes),
+            );
+      if (
+        context === null ||
+        context.status !== "active" ||
+        context.membership_status !== "active" ||
+        currentScopes.length === 0
+      ) {
+        await revokeFamily(tx, row.family_id, "membership_incompatible", input.now);
+        return { kind: "invalid" };
+      }
       await tx.execute(
         `UPDATE ${IDENTITY_REFRESH_TOKENS_TABLE} SET used_at = $2 WHERE id = $1`,
         [row.refresh_id, input.now.toISOString()],
@@ -557,8 +881,10 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
       }
       await insertRefreshToken(tx, input.replacement);
       await tx.execute(
-        `UPDATE ${IDENTITY_SESSION_FAMILIES_TABLE} SET updated_at = $2 WHERE id = $1`,
-        [row.family_id, input.now.toISOString()],
+        `UPDATE ${IDENTITY_SESSION_FAMILIES_TABLE}
+         SET scopes = $2::jsonb, updated_at = $3
+         WHERE id = $1`,
+        [row.family_id, JSON.stringify(currentScopes), input.now.toISOString()],
       );
       return {
         kind: "rotated",
@@ -566,7 +892,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
           id: row.family_id,
           userId: row.user_id,
           tenantId: row.tenant_id,
-          scopes: parseScopes(row.family_scopes),
+          scopes: currentScopes,
           status: row.family_status,
           expiresAt: iso(row.family_expires_at),
           createdAt: iso(row.family_created_at),
@@ -579,6 +905,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
           id: context.tenant_id,
           slug: context.tenant_slug,
           name: context.tenant_name,
+          allowedScopes: parseScopes(context.tenant_allowed_scopes),
           createdAt: iso(context.tenant_created_at),
         },
         membership: {
@@ -587,6 +914,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
           userId: context.id,
           role: context.membership_role,
           scopes: parseScopes(context.membership_scopes),
+          status: context.membership_status,
           createdAt: iso(context.membership_created_at),
         },
       };
@@ -594,7 +922,10 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
   }
 
   async revokeSessionFamily(familyId: string, reason: string, now: Date): Promise<void> {
-    await this.client.transaction((tx) => revokeFamily(tx, familyId, reason, now));
+    await this.client.transaction(async (tx) => {
+      await revokeFamily(tx, familyId, reason, now);
+      await revokeIssuedJtis(tx, `issued.family_id = $1`, [familyId], now);
+    });
   }
 
   async revokeAllUserSessions(userId: string, reason: string, now: Date): Promise<void> {
@@ -606,6 +937,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
         [userId],
       );
       for (const row of rows) await revokeFamily(tx, row.id, reason, now);
+      await revokeIssuedJtis(tx, `issued.user_id = $1`, [userId], now);
     });
   }
 
@@ -619,19 +951,206 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
     );
   }
 
+  async recordIssuedAccessToken(input: IdentityIssuedAccessTokenRecord): Promise<void> {
+    await this.client.transaction(async (tx) => {
+      const family = await tx.get<{ ok: boolean }>(
+        `SELECT true AS ok
+         FROM ${IDENTITY_SESSION_FAMILIES_TABLE} family
+         JOIN ${IDENTITY_USERS_TABLE} identity_user ON identity_user.id = family.user_id
+         JOIN ${IDENTITY_MEMBERSHIPS_TABLE} membership
+           ON membership.user_id = family.user_id AND membership.tenant_id = family.tenant_id
+         WHERE family.id = $1
+           AND family.user_id = $2
+           AND family.tenant_id = $3
+           AND family.status = 'active'
+           AND identity_user.status = 'active'
+           AND membership.status = 'active'
+         FOR UPDATE OF family, identity_user, membership`,
+        [input.familyId, input.userId, input.tenantId],
+      );
+      if (family === null) {
+        throw lifecycleFailure("invalid_credentials", "authentication failed", 401);
+      }
+      await tx.execute(
+        `INSERT INTO ${IDENTITY_ISSUED_ACCESS_TOKENS_TABLE}
+           (jti_hash, family_id, user_id, tenant_id, expires_at, issued_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (jti_hash) DO NOTHING`,
+        [
+          input.jtiHash,
+          input.familyId,
+          input.userId,
+          input.tenantId,
+          input.expiresAt,
+          input.issuedAt,
+        ],
+      );
+    });
+  }
+
+  async mutateUserSecurityState(input: {
+    actorUserId: string;
+    actorTenantId: string;
+    actorTokenScopes: readonly string[];
+    platformAuthorityScope: string;
+    platformAuthorityTenantSlugs: readonly string[];
+    targetUserId: string;
+    status: "active" | "disabled" | "deleted";
+    now: Date;
+  }): Promise<IdentityUserRecord | null> {
+    return this.client.transaction(async (tx) => {
+      const actor = await tx.get<{
+        role: "owner" | "admin" | "member";
+        scopes: unknown;
+        membership_status: "active" | "suspended";
+        user_status: "active" | "disabled" | "deleted";
+        tenant_slug: string;
+      }>(
+        `SELECT
+           membership.role,
+           membership.scopes,
+           membership.status AS membership_status,
+           actor_user.status AS user_status,
+           tenant.slug AS tenant_slug
+         FROM ${IDENTITY_MEMBERSHIPS_TABLE} membership
+         JOIN ${IDENTITY_USERS_TABLE} actor_user ON actor_user.id = membership.user_id
+         JOIN ${IDENTITY_TENANTS_TABLE} tenant ON tenant.id = membership.tenant_id
+         WHERE membership.user_id = $1 AND membership.tenant_id = $2
+         FOR UPDATE OF membership, actor_user, tenant`,
+        [input.actorUserId, input.actorTenantId],
+      );
+      const target = await tx.get<UserRow>(
+        `SELECT * FROM ${IDENTITY_USERS_TABLE} WHERE id = $1 FOR UPDATE`,
+        [input.targetUserId],
+      );
+      if (target === null) return null;
+      const targetRoles = await tx.many<{ role: "owner" | "admin" | "member" }>(
+        `SELECT role FROM ${IDENTITY_MEMBERSHIPS_TABLE}
+         WHERE user_id = $1
+         FOR UPDATE`,
+        [input.targetUserId],
+      );
+      const highestTargetRole = highestMembershipRole(targetRoles.map((item) => item.role));
+      if (
+        actor === null ||
+        actor.user_status !== "active" ||
+        actor.membership_status !== "active" ||
+        actor.role !== "owner" ||
+        !input.platformAuthorityTenantSlugs.includes(actor.tenant_slug) ||
+        !input.actorTokenScopes.includes(input.platformAuthorityScope) ||
+        !parseScopes(actor.scopes).includes(input.platformAuthorityScope) ||
+        highestTargetRole === null ||
+        !roleCanManage(actor.role, highestTargetRole)
+      ) {
+        throw lifecycleFailure("forbidden", "access denied", 403);
+      }
+      const updated = await tx.one<UserRow>(
+        `UPDATE ${IDENTITY_USERS_TABLE}
+         SET status = $2::text,
+             updated_at = $3::timestamptz,
+             disabled_at = CASE WHEN $2::text = 'disabled' THEN $3::timestamptz ELSE NULL END,
+             deleted_at = CASE WHEN $2::text = 'deleted' THEN $3::timestamptz ELSE NULL END
+         WHERE id = $1
+         RETURNING *`,
+        [input.targetUserId, input.status, input.now.toISOString()],
+      );
+      const families = await tx.many<{ id: string }>(
+        `SELECT id FROM ${IDENTITY_SESSION_FAMILIES_TABLE}
+         WHERE user_id = $1 AND status = 'active'
+         FOR UPDATE`,
+        [input.targetUserId],
+      );
+      for (const family of families) {
+        await revokeFamily(tx, family.id, `user_${input.status}`, input.now);
+      }
+      await revokeIssuedJtis(tx, `issued.user_id = $1`, [input.targetUserId], input.now);
+      return mapUser(updated);
+    });
+  }
+
+  async suspendMembership(input: {
+    actorUserId: string;
+    tenantId: string;
+    targetUserId: string;
+    now: Date;
+  }) {
+    return this.client.transaction(async (tx) => {
+      const memberships = await tx.many<{
+        id: string;
+        user_id: string;
+        role: "owner" | "admin" | "member";
+        scopes: unknown;
+        status: "active" | "suspended";
+        created_at: Date | string;
+        user_status: "active" | "disabled" | "deleted";
+      }>(
+        `SELECT membership.*, identity_user.status AS user_status
+         FROM ${IDENTITY_MEMBERSHIPS_TABLE} membership
+         JOIN ${IDENTITY_USERS_TABLE} identity_user ON identity_user.id = membership.user_id
+         WHERE membership.tenant_id = $1
+           AND membership.user_id IN ($2, $3)
+         FOR UPDATE OF membership, identity_user`,
+        [input.tenantId, input.actorUserId, input.targetUserId],
+      );
+      const actor = memberships.find((membership) => membership.user_id === input.actorUserId);
+      const target = memberships.find((membership) => membership.user_id === input.targetUserId);
+      if (target === undefined) return null;
+      if (
+        actor === undefined ||
+        actor.user_status !== "active" ||
+        actor.status !== "active" ||
+        !roleCanManage(actor.role, target.role)
+      ) {
+        throw lifecycleFailure("forbidden", "access denied", 403);
+      }
+      await tx.execute(
+        `UPDATE ${IDENTITY_MEMBERSHIPS_TABLE} SET status = 'suspended' WHERE id = $1`,
+        [target.id],
+      );
+      const families = await tx.many<{ id: string }>(
+        `SELECT id FROM ${IDENTITY_SESSION_FAMILIES_TABLE}
+         WHERE user_id = $1 AND tenant_id = $2 AND status = 'active'
+         FOR UPDATE`,
+        [input.targetUserId, input.tenantId],
+      );
+      for (const family of families) await revokeFamily(tx, family.id, "membership_suspended", input.now);
+      await revokeIssuedJtis(
+        tx,
+        `issued.user_id = $1 AND issued.tenant_id = $2`,
+        [input.targetUserId, input.tenantId],
+        input.now,
+      );
+      return {
+        id: target.id,
+        tenantId: input.tenantId,
+        userId: target.user_id,
+        role: target.role,
+        scopes: parseScopes(target.scopes),
+        status: "suspended" as const,
+        createdAt: iso(target.created_at),
+      };
+    });
+  }
+
   async canAdminister(actorUserId: string, tenantId: string, targetUserId: string): Promise<boolean> {
-    const row = await this.client.get<{ ok: boolean }>(
-      `SELECT true AS ok
+    const row = await this.client.get<{
+      actor_role: "owner" | "admin" | "member";
+      target_role: "owner" | "admin" | "member";
+    }>(
+      `SELECT actor.role AS actor_role, target.role AS target_role
        FROM ${IDENTITY_MEMBERSHIPS_TABLE} actor
+       JOIN ${IDENTITY_USERS_TABLE} actor_user ON actor_user.id = actor.user_id
        JOIN ${IDENTITY_MEMBERSHIPS_TABLE} target
          ON target.tenant_id = actor.tenant_id
         AND target.user_id = $3
        WHERE actor.user_id = $1
          AND actor.tenant_id = $2
-         AND actor.role IN ('owner', 'admin')`,
+         AND actor.status = 'active'
+         AND target.status = 'active'
+         AND actor_user.status = 'active'`,
       [actorUserId, tenantId, targetUserId],
     );
-    return row !== null;
+    return row !== null && roleCanManage(row.actor_role, row.target_role);
   }
 
   async setUserStatus(
@@ -639,17 +1158,31 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
     status: "active" | "disabled" | "deleted",
     now: Date,
   ): Promise<IdentityUserRecord | null> {
-    const rows = await this.client.many<UserRow>(
-      `UPDATE ${IDENTITY_USERS_TABLE}
-       SET status = $2,
-           updated_at = $3,
-           disabled_at = CASE WHEN $2 = 'disabled' THEN $3 ELSE NULL END,
-           deleted_at = CASE WHEN $2 = 'deleted' THEN $3 ELSE NULL END
-       WHERE id = $1
-       RETURNING *`,
-      [userId, status, now.toISOString()],
-    );
-    return rows[0] === undefined ? null : mapUser(rows[0]);
+    return this.client.transaction(async (tx) => {
+      const rows = await tx.many<UserRow>(
+        `UPDATE ${IDENTITY_USERS_TABLE}
+         SET status = $2::text,
+             updated_at = $3::timestamptz,
+             disabled_at = CASE WHEN $2::text = 'disabled' THEN $3::timestamptz ELSE NULL END,
+             deleted_at = CASE WHEN $2::text = 'deleted' THEN $3::timestamptz ELSE NULL END
+         WHERE id = $1
+         RETURNING *`,
+        [userId, status, now.toISOString()],
+      );
+      const user = rows[0];
+      if (user === undefined) return null;
+      if (status !== "active") {
+        const families = await tx.many<{ id: string }>(
+          `SELECT id FROM ${IDENTITY_SESSION_FAMILIES_TABLE}
+           WHERE user_id = $1 AND status = 'active'
+           FOR UPDATE`,
+          [userId],
+        );
+        for (const family of families) await revokeFamily(tx, family.id, `user_${status}`, now);
+        await revokeIssuedJtis(tx, `issued.user_id = $1`, [userId], now);
+      }
+      return mapUser(user);
+    });
   }
 
   async createOneTimeToken(token: IdentityOneTimeTokenRecord): Promise<void> {
@@ -733,6 +1266,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
         [token.user_id],
       );
       for (const family of families) await revokeFamily(tx, family.id, "password_recovery", input.now);
+      await revokeIssuedJtis(tx, `issued.user_id = $1`, [token.user_id], input.now);
       return token.user_id;
     });
   }
@@ -747,13 +1281,41 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
   }
 
   async getSessionFamilyStatus(sessionSha256: string): Promise<IdentitySessionFamilyStatus> {
-    const row = await this.client.get<{ status: SessionFamilyStatusRow }>(
-      `SELECT status FROM ${IDENTITY_SESSION_FAMILIES_TABLE} WHERE session_hash = $1`,
+    const row = await this.client.get<{
+      family_status: SessionFamilyStatusRow;
+      family_scopes: unknown;
+      user_status: "active" | "disabled" | "deleted";
+      membership_status: "active" | "suspended";
+      membership_scopes: unknown;
+      allowed_scopes: unknown;
+    }>(
+      `SELECT
+         family.status AS family_status,
+         family.scopes AS family_scopes,
+         identity_user.status AS user_status,
+         membership.status AS membership_status,
+         membership.scopes AS membership_scopes,
+         tenant.allowed_scopes
+       FROM ${IDENTITY_SESSION_FAMILIES_TABLE} family
+       JOIN ${IDENTITY_USERS_TABLE} identity_user ON identity_user.id = family.user_id
+       JOIN ${IDENTITY_MEMBERSHIPS_TABLE} membership
+         ON membership.user_id = family.user_id AND membership.tenant_id = family.tenant_id
+       JOIN ${IDENTITY_TENANTS_TABLE} tenant ON tenant.id = family.tenant_id
+       WHERE family.session_hash = $1`,
       [requireSha256(sessionSha256)],
     );
     if (row === null) return "unknown";
-    if (row.status === "active") return "active";
-    if (row.status === "disabled") return "disabled";
+    if (row.user_status === "deleted") return "deleted";
+    if (
+      row.user_status !== "active" ||
+      row.membership_status !== "active" ||
+      !scopeSubset(parseScopes(row.family_scopes), parseScopes(row.membership_scopes)) ||
+      !scopeSubset(parseScopes(row.family_scopes), parseScopes(row.allowed_scopes))
+    ) {
+      return "disabled";
+    }
+    if (row.family_status === "active") return "active";
+    if (row.family_status === "disabled") return "disabled";
     return "deleted";
   }
 }
@@ -812,6 +1374,25 @@ async function revokeFamily(
   );
 }
 
+async function revokeIssuedJtis(
+  client: TypedQueryClient,
+  predicateSql: string,
+  predicateParameters: readonly unknown[],
+  now: Date,
+): Promise<void> {
+  const nowParameter = `$${predicateParameters.length + 1}`;
+  await client.execute(
+    `INSERT INTO ${IDENTITY_JTI_REVOCATIONS_TABLE}
+       (jti_hash, user_id, expires_at, revoked_at)
+     SELECT issued.jti_hash, issued.user_id, issued.expires_at, ${nowParameter}
+     FROM ${IDENTITY_ISSUED_ACCESS_TOKENS_TABLE} issued
+     WHERE ${predicateSql}
+       AND issued.expires_at > ${nowParameter}
+     ON CONFLICT (jti_hash) DO NOTHING`,
+    [...predicateParameters, now.toISOString()],
+  );
+}
+
 function mapUser(row: UserRow): IdentityUserRecord {
   return {
     id: row.id,
@@ -829,6 +1410,7 @@ function mapTenant(row: TenantRow) {
     id: row.id,
     slug: row.slug,
     name: row.name,
+    allowedScopes: parseScopes(row.allowed_scopes),
     createdAt: iso(row.created_at),
   };
 }
@@ -840,6 +1422,7 @@ function mapMembership(row: MembershipTenantRow) {
     userId: row.user_id,
     role: row.role,
     scopes: parseScopes(row.scopes),
+    status: row.status,
     createdAt: iso(row.created_at),
   };
 }
@@ -850,7 +1433,51 @@ function mapThrottle(row: ThrottleRow): IdentityLoginThrottleRecord {
     failures: Number(row.failures),
     windowStartedAt: iso(row.window_started_at),
     ...(row.locked_until === null ? {} : { lockedUntil: iso(row.locked_until) }),
+    ...(row.tokens === null ? {} : { tokens: Number(row.tokens) }),
+    ...(row.last_refilled_at === null ? {} : { lastRefilledAt: iso(row.last_refilled_at) }),
+    inFlight: Number(row.in_flight),
+    ...(row.updated_at === null ? {} : { updatedAt: iso(row.updated_at) }),
   };
+}
+
+function scopeSubset(values: readonly string[], allowedValues: readonly string[]): boolean {
+  const allowed = new Set(allowedValues);
+  return values.every((value) => allowed.has(value));
+}
+
+function intersectScopeSets(...collections: readonly (readonly string[])[]): string[] {
+  if (collections.length === 0) return [];
+  const [first, ...rest] = collections;
+  return [...new Set((first ?? []).filter((scope) => rest.every((collection) => collection.includes(scope))))].sort();
+}
+
+const ROLE_RANK: Readonly<Record<"owner" | "admin" | "member", number>> = {
+  member: 0,
+  admin: 1,
+  owner: 2,
+};
+
+function roleCanAssign(
+  actor: "owner" | "admin" | "member",
+  target: "owner" | "admin" | "member",
+): boolean {
+  return ROLE_RANK[actor] >= ROLE_RANK[target];
+}
+
+function roleCanManage(
+  actor: "owner" | "admin" | "member",
+  target: "owner" | "admin" | "member",
+): boolean {
+  return ROLE_RANK[actor] > ROLE_RANK[target];
+}
+
+function highestMembershipRole(
+  roles: readonly ("owner" | "admin" | "member")[],
+): "owner" | "admin" | "member" | null {
+  return roles.reduce<"owner" | "admin" | "member" | null>(
+    (highest, role) => highest === null || ROLE_RANK[role] > ROLE_RANK[highest] ? role : highest,
+    null,
+  );
 }
 
 function parseScopes(value: unknown): string[] {

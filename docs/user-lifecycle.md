@@ -16,8 +16,9 @@ The contract version is `hasna.identity-user-lifecycle/v1`.
 - `IdentityAccessTokenIssuer` signs through one active key in the same
   `IdentityJwksRegistry` used by `IdentityAccessTokenVerifier`. Private key
   loading remains the embedding runtime's responsibility.
-- Tenant IDs and membership scopes are persisted authority. Client-requested
-  tenant IDs or scopes never create membership or expand grants.
+- Tenant IDs, tenant scope allowlists, membership status, and membership scopes
+  are persisted authority. Client-requested tenant IDs or scopes never create
+  membership or expand grants.
 - Raw passwords, invite tokens, verification tokens, recovery tokens, refresh
   tokens, JTIs, and session IDs are not persisted in token-state tables.
   Passwords use Argon2id; opaque tokens, JTIs, and session references are
@@ -40,8 +41,16 @@ user exists. Concurrent attempts produce one administrator and one
 normalization and a database unique constraint.
 
 Email and username identifiers are trimmed, NFKC-normalized, and lowercased.
-Email has a bounded structural check. Usernames accept 3–64 lowercase
+Email domains are additionally canonicalized to their UTS-46/IDNA ASCII form,
+so Unicode and equivalent punycode spellings collide. Usernames accept 3–64 lowercase
 alphanumeric, dot, underscore, or hyphen characters.
+
+Invite creation is a transactional authority check. The current actor user and
+membership must be active, the access token and persisted membership must both
+hold the configured invite-management scope, the invited role cannot outrank
+the actor, and invited scopes must be a subset of the token, membership, and
+tenant allowlist. Invite consumption rechecks persisted role and scope
+authority before creating the membership.
 
 ## Credentials and login
 
@@ -53,11 +62,16 @@ Unknown users, incorrect passwords, disabled users, deleted users, and tenant
 mismatches return the same authentication failure. Unknown users still verify
 against a cached Argon2id dummy hash. Throttle keys hash the normalized
 identifier and the embedding runtime's client key; failures and lock expiry are
-updated atomically.
+updated atomically. A persisted token bucket and in-flight reservation cap
+admit work before password verification, so concurrent requests cannot all
+enter the expensive password path after the same check.
 
 Login selects one persisted membership. Requested scopes must be a non-empty
 subset of that membership's scopes. Tokens bind `sub`, `tenant`, `session`,
 `scopes`, `iat`, `nbf`, `exp`, and `jti`.
+Session creation and every refresh re-read active user, membership, and tenant
+authority transactionally, intersect family scopes with current grants, and
+revoke a family whose scope intersection is empty.
 
 ## Refresh rotation and revocation
 
@@ -68,20 +82,32 @@ the family and all its refresh generations are revoked in one transaction.
 
 Access-token verification checks the hashed JTI and hashed session-family
 reference on every request. Logout records the current JTI and revokes the
-family. Logout-all, password recovery, account disable, and soft-delete revoke
-all of that user's active families. Administrative disable/delete requires an
-owner or administrator membership in the same tenant as the target.
+family. Issued JTI hashes are tracked so logout-all, password recovery, global
+account disable, and soft-delete atomically revoke both active families and
+their unexpired access-token JTIs.
+
+Tenant membership suspension and platform-global user state are separate.
+Tenant role hierarchy permits only a strictly higher tenant role to suspend a
+membership, without disabling the same user in other tenants. Global
+disable/delete/restore requires the configured platform-authority scope in both
+the actor token and current owner membership, requires the current tenant slug
+to be in the configured platform-authority tenant allowlist, and also enforces
+role hierarchy.
+Token verification rechecks current user, membership, tenant allowlist, and
+family scope state on every request.
 
 ## Verification and recovery
 
 Verification and recovery tokens are one-time, hashed, expiring records.
-Delivery occurs only through caller-supplied hooks. Unknown recovery requests
-return the same accepted response without calling the delivery hook.
+Delivery occurs only through caller-supplied hooks and is dispatched
+asynchronously after durable token creation. Known and unknown recovery
+requests run the same prewarmed dummy-hash work, share normalized
+identifier-plus-client throttling, and return the same accepted response.
 Successful recovery replaces the password hash and revokes all sessions.
 
-Restore is a trusted recovery/administrative library hook and is not exposed by
-the public lifecycle HTTP handler. Existing sessions remain revoked after a
-restore.
+Restore requires the same explicit platform authority as disable/delete and is
+not exposed by the public lifecycle HTTP handler. Existing sessions remain
+revoked after a restore.
 
 ## HTTP and SDK
 
@@ -104,13 +130,20 @@ include the same schemas and operations.
 
 ## Postgres migrations
 
-Lifecycle migrations are `identities_0004` through `identities_0008`:
+Lifecycle migrations are `identities_0004` through `identities_0009`:
 
 1. users, tenants, memberships;
 2. normalized login identifiers, Argon2id credentials, invites;
 3. session families, hashed refresh tokens, hashed JTI revocations;
 4. verification and recovery tokens;
 5. login throttle state.
+6. tenant allowlists, membership suspension, token-bucket reservations, issued
+   JTI tracking, and identifier-canonicalization audit state.
+
+Store readiness performs a collision audit of existing email identifiers before
+serving lifecycle requests. Non-colliding legacy forms are rewritten to the
+canonical UTS-46 ASCII domain form; collisions are recorded for operator
+resolution and readiness fails closed.
 
 They use the existing checksum ledger, are safe to reapply, and reject checksum
 drift. `rollbackIdentityLifecycleMigrations` is an explicit destructive

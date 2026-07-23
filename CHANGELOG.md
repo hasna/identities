@@ -24,6 +24,11 @@
   first-admin bootstrap, timing-safe throttled login, mountable HTTP schemas
   and generated SDK operations, a guarded CLI bootstrap, and reversible
   checksum-guarded Postgres migrations.
+- Hardened lifecycle authority with transactional invite role/scope/tenant
+  checks, current membership scope intersection, tenant-only suspension versus
+  platform-global state, atomic family/JTI revocation, bounded concurrent
+  throttle admission, prewarmed enumeration-safe asynchronous recovery, and
+  UTS-46 email-domain canonicalization with migration collision audits.
 - Added reusable scoped JWT verification and issuance, public JWKS rotation
   status, hashed token/session-family revocation checks, and composable auth
   API and CLI surfaces for local and self-hosted consumers.

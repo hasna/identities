@@ -235,6 +235,12 @@ Argon2id password credentials; tenant-bound membership scopes; hashed rotating
 refresh tokens; replay-driven family revocation; logout, logout-all, disable,
 soft-delete, verification, and recovery.
 
+Invite authority, tenant scope allowlists, role hierarchy, membership
+suspension, session scope reduction, and platform-global user state are
+validated transactionally. Login and recovery use bounded pre-admission
+throttles, email domains use UTS-46/IDNA canonicalization, and access-token
+verification observes current user, membership, family, and JTI state.
+
 The service issues access tokens through an `IdentityAccessTokenIssuer` bound
 to the same `IdentityJwksRegistry` used by
 `IdentityAccessTokenVerifier`. Consumers cannot silently publish one key set
