@@ -185,6 +185,9 @@ See [docs/browserplan.md](docs/browserplan.md) for the BrowserPlan machine, iden
 See [docs/media.md](docs/media.md) for voice and profile image generation.
 See [docs/instructions.md](docs/instructions.md) for the instruction-source schema, precedence, export contract, and fail-closed safety rules.
 See [docs/identity-contract.md](docs/identity-contract.md) for the versioned canonical agent identity, scoped handle/alias resolver, runtime-context, five-part source-lineage revision history, and dry-run migration contracts. Cross-repo consumers can vendor [the V1 conformance fixture](docs/fixtures/agent-identity-v1.conformance.json), identified as `hasna.identities.agent-identity/v1/conformance/1`; the SDK exports its repository-relative path and SHA-256 fingerprint for deterministic pinning without machine paths or network tests.
+See [docs/user-lifecycle.md](docs/user-lifecycle.md) for the Identities-owned
+end-user registration, login, tenant membership, refresh rotation, recovery,
+revocation, API, CLI bootstrap, and Postgres migration contract.
 
 ## Scoped access-token contract
 
@@ -222,6 +225,40 @@ The token file must be owner-only. The state file contains only lowercase
 SHA-256 hashes and session-family statuses. Private signing keys remain
 caller-owned and are accepted only as runtime inputs to
 `issueIdentityAccessToken`.
+
+## End-user lifecycle
+
+`IdentityLifecycleService` is the reusable authority for human application
+users. It supports `disabled`, `invite`, and `open` registration; an atomic
+first-admin bootstrap; normalized unique email or username login identifiers;
+Argon2id password credentials; tenant-bound membership scopes; hashed rotating
+refresh tokens; replay-driven family revocation; logout, logout-all, disable,
+soft-delete, verification, and recovery.
+
+The service issues access tokens through an `IdentityAccessTokenIssuer` bound
+to the same `IdentityJwksRegistry` used by
+`IdentityAccessTokenVerifier`. Consumers cannot silently publish one key set
+while signing from another. `createIdentityLifecycleApi` exposes mountable
+`/v1/auth/*` handlers, and `PgIdentityLifecycleStore` supplies the relational
+Postgres implementation. Infinity and other applications should mount or call
+these surfaces instead of creating their own credential or session tables.
+
+The injected CLI bootstrap reads the initial password only from an owner-only
+file and never prints access or refresh tokens. An optional session file is
+created with owner-only permissions:
+
+```bash
+identities auth bootstrap \
+  --identifier-kind email \
+  --identifier owner@example.test \
+  --password-file /owner-only/bootstrap-password \
+  --display-name "Owner" \
+  --session-file /owner-only/identity-session.json
+```
+
+The standalone CLI intentionally fails closed unless its embedding runtime
+injects an `IdentityLifecycleService`; signing keys and deployment-specific
+policy never come from command-line flags.
 
 ## Instruction Sources
 

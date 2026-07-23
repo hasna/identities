@@ -26,6 +26,7 @@ import {
   type TypedQueryClient,
 } from "./generated/storage-kit/index.js";
 import { DEFAULT_STORE_ID, IDENTITY_AUDIT_TABLE, IDENTITY_STORE_TABLE, identitiesMigrations } from "./migrations.js";
+import { PgIdentityLifecycleStore } from "./pg-user-lifecycle.js";
 
 export const IDENTITIES_APP_NAME = "identities";
 
@@ -103,6 +104,7 @@ export class PgStorageBackend implements StorageBackend {
 
 export interface CloudIdentityStore {
   store: IdentityStore;
+  lifecycleStore: PgIdentityLifecycleStore;
   client: PoolQueryClient;
   connectionSource: string;
   close: () => Promise<void>;
@@ -119,6 +121,7 @@ export function createCloudIdentityStore(options: { storeId?: string; applicatio
   const store = new IdentityStore({ backend: new PgStorageBackend(client, options.storeId) });
   return {
     store,
+    lifecycleStore: new PgIdentityLifecycleStore(client),
     client,
     connectionSource,
     close: async () => {

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   SignJWT,
   createLocalJWKSet,
@@ -103,6 +103,32 @@ export interface IssueIdentityAccessTokenOptions {
   jti: string;
   issuedAt: number;
   notBefore: number;
+  expiresAt: number;
+}
+
+export interface IdentityAccessTokenIssuerOptions {
+  registry: IdentityJwksRegistry;
+  privateKey: CryptoKey | KeyObject | JWK | Uint8Array;
+  kid: string;
+  alg: IdentityPublicKeyAlgorithm;
+  issuer: string;
+  audience: string | readonly string[];
+  accessTokenTtlSeconds?: number;
+}
+
+export interface IdentityAccessTokenIssueInput {
+  subject: string;
+  tenant: string;
+  session: string;
+  scopes: readonly string[];
+  now?: Date;
+  jti?: string;
+}
+
+export interface IdentityAccessTokenIssue {
+  token: string;
+  jti: string;
+  issuedAt: number;
   expiresAt: number;
 }
 
@@ -225,6 +251,76 @@ export class IdentityJwksRegistry {
       throw new IdentityAuthError("key_unavailable", "access token signing key is outside its verification window");
     }
     return { keys: [toVerificationJwk(key)] };
+  }
+
+  assertCanIssue(kid: string, alg: IdentityPublicKeyAlgorithm, now = new Date()): void {
+    const normalizedKid = requiredText(kid, "kid");
+    const key = this.keys.get(normalizedKid);
+    if (key === undefined || key.status !== "active") {
+      throw configurationError("access tokens require an active signing key from the bound JWKS registry");
+    }
+    if (key.alg !== alg) {
+      throw configurationError("access token signing algorithm must match the bound JWKS key");
+    }
+    if (!isWithinPublicationWindow(key, now)) {
+      throw configurationError("access token signing key is outside its publication window");
+    }
+  }
+}
+
+export class IdentityAccessTokenIssuer {
+  readonly registry: IdentityJwksRegistry;
+  private readonly privateKey: CryptoKey | KeyObject | JWK | Uint8Array;
+  private readonly kid: string;
+  private readonly alg: IdentityPublicKeyAlgorithm;
+  private readonly issuer: string;
+  private readonly audience: string | string[];
+  private readonly accessTokenTtlSeconds: number;
+
+  constructor(options: IdentityAccessTokenIssuerOptions) {
+    this.registry = options.registry;
+    this.privateKey = options.privateKey;
+    this.kid = requiredText(options.kid, "kid");
+    this.alg = requirePublicKeyAlgorithm(options.alg);
+    this.issuer = requiredText(options.issuer, "issuer");
+    if (this.issuer !== options.registry.issuer) {
+      throw configurationError("access token issuer must match the bound JWKS registry");
+    }
+    this.audience = normalizeAudience(options.audience);
+    this.accessTokenTtlSeconds = boundedPositiveInteger(
+      options.accessTokenTtlSeconds ?? 600,
+      "accessTokenTtlSeconds",
+      3_600,
+    );
+    options.registry.assertCanIssue(this.kid, this.alg);
+  }
+
+  isBoundToJwksRegistry(registry: IdentityJwksRegistry): boolean {
+    return this.registry === registry;
+  }
+
+  async issue(input: IdentityAccessTokenIssueInput): Promise<IdentityAccessTokenIssue> {
+    const now = input.now ?? new Date();
+    this.registry.assertCanIssue(this.kid, this.alg, now);
+    const issuedAt = Math.floor(now.getTime() / 1_000);
+    const expiresAt = issuedAt + this.accessTokenTtlSeconds;
+    const jti = requiredText(input.jti ?? randomUUID(), "jti");
+    const token = await issueIdentityAccessToken({
+      privateKey: this.privateKey,
+      kid: this.kid,
+      alg: this.alg,
+      issuer: this.issuer,
+      audience: this.audience,
+      subject: input.subject,
+      tenant: input.tenant,
+      session: input.session,
+      scopes: input.scopes,
+      jti,
+      issuedAt,
+      notBefore: issuedAt,
+      expiresAt,
+    });
+    return { token, jti, issuedAt, expiresAt };
   }
 }
 

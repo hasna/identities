@@ -15,6 +15,7 @@ import type { IdentityStore } from "../storage.js";
 import { createCloudIdentityStore, cloudHealth, cloudReady, type CloudIdentityStore } from "../pg-store.js";
 import { getPackageVersion } from "../version.js";
 import { buildOpenApiDocument } from "./openapi.js";
+import type { IdentityLifecycleApi } from "../user-lifecycle.js";
 
 export const IDENTITIES_SERVE_APP = "identities";
 const DEFAULT_PORT = 15455;
@@ -28,6 +29,8 @@ export interface ServeOptions {
   signingSecret?: string;
   /** Called on each auth decision for the AUDIT trail. */
   audit?: (event: unknown) => void;
+  /** Optional Identities-owned public end-user lifecycle handler. */
+  lifecycleApi?: IdentityLifecycleApi;
 }
 
 export interface RunningServer {
@@ -62,6 +65,7 @@ interface Handler {
   verifier: ApiKeyVerifier;
   keys: ApiKeyStore;
   version: string;
+  lifecycleApi?: IdentityLifecycleApi;
 }
 
 async function readJsonBody(req: Request): Promise<any> {
@@ -177,7 +181,14 @@ export async function buildHandler(options: ServeOptions = {}): Promise<Handler>
     isRevoked: keys.isRevoked,
     ...(options.audit ? { audit: options.audit as any } : {}),
   });
-  return { store: cloud.store, cloud, verifier, keys, version: getPackageVersion() };
+  return {
+    store: cloud.store,
+    cloud,
+    verifier,
+    keys,
+    version: getPackageVersion(),
+    ...(options.lifecycleApi === undefined ? {} : { lifecycleApi: options.lifecycleApi }),
+  };
 }
 
 export async function createFetchHandler(options: ServeOptions = {}): Promise<{
@@ -216,6 +227,14 @@ export async function createFetchHandler(options: ServeOptions = {}): Promise<{
     }
     if (path === "/" ) {
       return json({ name: "@hasna/identities", status: "ok", version: handler.version, mode: "cloud" });
+    }
+    if (path.startsWith("/v1/auth/")) {
+      if (handler.lifecycleApi === undefined) {
+        return json({ error: "Identity user lifecycle is not configured", reason: "lifecycle_not_configured" }, 503, {
+          "cache-control": "no-store",
+        });
+      }
+      return handler.lifecycleApi.handle(req);
     }
     if (path.startsWith("/v1/") || path === "/v1") {
       return handleV1(handler, req, url);

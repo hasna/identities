@@ -34,6 +34,7 @@ export function buildOpenApiDocument(version: string) {
     components: {
       securitySchemes: {
         ApiKeyAuth: { type: "apiKey", in: "header", name: "x-api-key" },
+        BearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
       },
       schemas: {
         Identity: {
@@ -132,6 +133,107 @@ export function buildOpenApiDocument(version: string) {
           properties: { error: { type: "string" }, reason: { type: "string" } },
           required: ["error"],
         },
+        LoginIdentifierInput: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            kind: { type: "string", enum: ["email", "username"] },
+            value: { type: "string", minLength: 1, maxLength: 320 },
+          },
+          required: ["kind", "value"],
+        },
+        SignupInput: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            identifier: { $ref: "#/components/schemas/LoginIdentifierInput" },
+            password: { type: "string", minLength: 12, maxLength: 1024, format: "password", writeOnly: true },
+            displayName: { type: "string", minLength: 1, maxLength: 160 },
+            inviteToken: { type: "string", minLength: 32, maxLength: 512, writeOnly: true },
+          },
+          required: ["identifier", "password", "displayName"],
+        },
+        LoginInput: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            identifier: { $ref: "#/components/schemas/LoginIdentifierInput" },
+            password: { type: "string", minLength: 1, maxLength: 1024, format: "password", writeOnly: true },
+            tenantId: { type: "string" },
+            scopes: { type: "array", items: { type: "string" }, maxItems: 100 },
+          },
+          required: ["identifier", "password"],
+        },
+        RefreshInput: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            refreshToken: { type: "string", minLength: 32, maxLength: 512, writeOnly: true },
+          },
+          required: ["refreshToken"],
+        },
+        AuthSession: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            schemaVersion: { type: "string", const: "hasna.identity-user-lifecycle/v1" },
+            user: { type: "object", additionalProperties: true },
+            tenant: { type: "object", additionalProperties: true },
+            membership: { type: "object", additionalProperties: true },
+            scopes: { type: "array", items: { type: "string" } },
+            accessToken: { type: "string", writeOnly: true },
+            accessTokenExpiresAt: { type: "string", format: "date-time" },
+            refreshToken: { type: "string", writeOnly: true },
+            refreshTokenExpiresAt: { type: "string", format: "date-time" },
+          },
+          required: [
+            "schemaVersion",
+            "user",
+            "tenant",
+            "membership",
+            "scopes",
+            "accessToken",
+            "accessTokenExpiresAt",
+            "refreshToken",
+            "refreshTokenExpiresAt",
+          ],
+        },
+        VerificationInput: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            token: { type: "string", minLength: 32, maxLength: 512, writeOnly: true },
+          },
+          required: ["token"],
+        },
+        RecoveryStartInput: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            identifier: { $ref: "#/components/schemas/LoginIdentifierInput" },
+          },
+          required: ["identifier"],
+        },
+        RecoveryCompleteInput: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            token: { type: "string", minLength: 32, maxLength: 512, writeOnly: true },
+            newPassword: { type: "string", minLength: 12, maxLength: 1024, format: "password", writeOnly: true },
+          },
+          required: ["token", "newPassword"],
+        },
+        ActionAccepted: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            accepted: { type: "boolean" },
+            verified: { type: "boolean" },
+            recovered: { type: "boolean" },
+            loggedOut: { type: "boolean" },
+            loggedOutAll: { type: "boolean" },
+          },
+        },
       },
     },
     security: [{ ApiKeyAuth: [] }],
@@ -195,7 +297,88 @@ export function buildOpenApiDocument(version: string) {
           responses: jsonResponse("Identity"),
         },
       },
+      "/v1/auth/signup": {
+        post: publicAuthOperation(
+          "signupIdentityUser",
+          "Register an end user under the configured disabled, invite, or open policy",
+          "SignupInput",
+          "AuthSession",
+          "201",
+        ),
+      },
+      "/v1/auth/login": {
+        post: publicAuthOperation(
+          "loginIdentityUser",
+          "Authenticate an end user with timing-safe errors and tenant-bound scopes",
+          "LoginInput",
+          "AuthSession",
+        ),
+      },
+      "/v1/auth/refresh": {
+        post: publicAuthOperation(
+          "refreshIdentitySession",
+          "Rotate a hashed refresh token; replay revokes the entire session family",
+          "RefreshInput",
+          "AuthSession",
+        ),
+      },
+      "/v1/auth/logout": {
+        post: bearerAuthOperation("logoutIdentitySession", "Revoke the current JTI and session family"),
+      },
+      "/v1/auth/logout-all": {
+        post: bearerAuthOperation("logoutAllIdentitySessions", "Revoke every session family for the current user"),
+      },
+      "/v1/auth/verification/complete": {
+        post: publicAuthOperation(
+          "verifyIdentityLoginIdentifier",
+          "Consume a one-time login-identifier verification token",
+          "VerificationInput",
+          "ActionAccepted",
+        ),
+      },
+      "/v1/auth/recovery/start": {
+        post: publicAuthOperation(
+          "startIdentityRecovery",
+          "Start recovery with an enumeration-safe accepted response",
+          "RecoveryStartInput",
+          "ActionAccepted",
+          "202",
+        ),
+      },
+      "/v1/auth/recovery/complete": {
+        post: publicAuthOperation(
+          "completeIdentityRecovery",
+          "Consume a one-time recovery token, replace the credential, and revoke sessions",
+          "RecoveryCompleteInput",
+          "ActionAccepted",
+        ),
+      },
     },
+  };
+}
+
+function publicAuthOperation(
+  operationId: string,
+  summary: string,
+  requestSchema: string,
+  responseSchema: string,
+  status = "200",
+) {
+  return {
+    operationId,
+    summary,
+    security: [],
+    requestBody: jsonBody(requestSchema),
+    responses: jsonResponse(responseSchema, status),
+  };
+}
+
+function bearerAuthOperation(operationId: string, summary: string) {
+  return {
+    operationId,
+    summary,
+    security: [{ BearerAuth: [] }],
+    responses: jsonResponse("ActionAccepted"),
   };
 }
 

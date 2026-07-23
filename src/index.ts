@@ -70,6 +70,7 @@ export {
   IDENTITY_AUDIT_TABLE,
   IDENTITY_STORE_TABLE,
   identitiesMigrations,
+  rollbackIdentityLifecycleMigrations,
 } from "./migrations.js";
 export { getPackageVersion } from "./version.js";
 export {
@@ -157,6 +158,7 @@ export {
   IDENTITY_JWKS_SCHEMA_VERSION,
   IDENTITY_PUBLIC_KEY_ALGORITHMS,
   IdentityAccessTokenVerifier,
+  IdentityAccessTokenIssuer,
   IdentityAuthError,
   IdentityJwksRegistry,
   InMemoryHashedTokenStateStore,
@@ -164,6 +166,9 @@ export {
   hashOpaqueClaim,
   issueIdentityAccessToken,
   type IdentityAccessTokenClaims,
+  type IdentityAccessTokenIssue,
+  type IdentityAccessTokenIssueInput,
+  type IdentityAccessTokenIssuerOptions,
   type IdentityAccessTokenVerifierOptions,
   type IdentityJwksDocument,
   type IdentityJwksKeyInput,
@@ -180,6 +185,8 @@ export {
   type IdentityAuthApi,
   type IdentityAuthApiOptions,
 } from "./identity-auth-api.js";
+export * from "./user-lifecycle.js";
+export { PgIdentityLifecycleStore } from "./pg-user-lifecycle.js";
 export { listEveDocumentKeys, writeEveAgent } from "./eve.js";
 export { applyContactPointSyncResults, syncIdentityContactPoints, syncIdentityContactPointsAndUpdate } from "./integrations.js";
 export {

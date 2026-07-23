@@ -59,6 +59,7 @@ import {
   type IdentityPublicKeyAlgorithm,
   type IdentitySessionFamilyStatus,
 } from "./identity-auth.js";
+import type { IdentityLifecycleService, LoginIdentifierKind } from "./user-lifecycle.js";
 
 interface ParsedArgs {
   positionals: string[];
@@ -122,6 +123,7 @@ Commands:
   agent seed-company [--docs-dir dir] [--keep-deprecated]
   auth jwks --jwks-file <public-jwks.json>
   auth verify --token-file <owner-only-file> --jwks-file <public-jwks.json> --token-state-file <hashed-state.json> --issuer <issuer> --audience <audience> --algorithm <alg> [--tenant <tenant>] [--scope <scope>...]
+  auth bootstrap --identifier-kind <email|username> --identifier <value> --password-file <owner-only-file> --display-name <name> [--session-file <new-owner-only-file>]
   eve export <id|identifier> --out <dir>
   media doctor
   media status [id|identifier]
@@ -145,13 +147,20 @@ Human output is compact by default. Use --verbose for full object details, --jso
 const defaultHumanLimit = 20;
 const defaultPreviewLength = 160;
 
-export async function runCli(argv = process.argv.slice(2)): Promise<void> {
+export interface IdentityCliRuntime {
+  lifecycleService?: IdentityLifecycleService;
+}
+
+export async function runCli(
+  argv = process.argv.slice(2),
+  runtime: IdentityCliRuntime = {},
+): Promise<void> {
   const parsed = parseArgs(argv);
   const json = hasFlag(parsed, "json");
   const store = createStoreFromArgs(parsed);
 
   try {
-    await dispatch(parsed, store, json);
+    await dispatch(parsed, store, json, runtime);
   } catch (error) {
     if (json) {
       console.log(JSON.stringify({ error: errorMessage(error) }, null, 2));
@@ -162,7 +171,12 @@ export async function runCli(argv = process.argv.slice(2)): Promise<void> {
   }
 }
 
-async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean): Promise<void> {
+async function dispatch(
+  parsed: ParsedArgs,
+  store: IdentityStore,
+  json: boolean,
+  runtime: IdentityCliRuntime,
+): Promise<void> {
   const [command, ...rest] = parsed.positionals;
 
   if (!command || command === "help" || hasFlag(parsed, "help") || hasFlag(parsed, "h")) {
@@ -278,7 +292,7 @@ async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean)
   }
 
   if (command === "auth") {
-    await dispatchAuth(rest, parsed, json);
+    await dispatchAuth(rest, parsed, json, runtime.lifecycleService);
     return;
   }
 
@@ -355,8 +369,64 @@ async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean)
   throw new Error(`Unknown command: ${command}`);
 }
 
-async function dispatchAuth(rest: string[], parsed: ParsedArgs, json: boolean): Promise<void> {
-  const subcommand = required(rest[0], "auth requires jwks or verify");
+async function dispatchAuth(
+  rest: string[],
+  parsed: ParsedArgs,
+  json: boolean,
+  lifecycleService?: IdentityLifecycleService,
+): Promise<void> {
+  const subcommand = required(rest[0], "auth requires bootstrap, jwks, or verify");
+  if (subcommand === "bootstrap") {
+    if (lifecycleService === undefined) {
+      throw new Error("auth bootstrap requires an injected IdentityLifecycleService");
+    }
+    const identifierKind = required(
+      flagValue(parsed, "identifier-kind"),
+      "auth bootstrap requires --identifier-kind",
+    );
+    if (identifierKind !== "email" && identifierKind !== "username") {
+      throw new Error("auth bootstrap --identifier-kind must be email or username");
+    }
+    const passwordPath = required(
+      flagValue(parsed, "password-file"),
+      "auth bootstrap requires --password-file",
+    );
+    const password = await readOwnerOnlySecretFile(passwordPath, {
+      label: "password",
+      minimumBytes: 12,
+      maximumBytes: 1_024,
+    });
+    const session = await lifecycleService.bootstrapFirstAdmin({
+      identifier: {
+        kind: identifierKind as LoginIdentifierKind,
+        value: required(flagValue(parsed, "identifier"), "auth bootstrap requires --identifier"),
+      },
+      password,
+      displayName: required(flagValue(parsed, "display-name"), "auth bootstrap requires --display-name"),
+    });
+    const sessionFile = flagValue(parsed, "session-file");
+    if (sessionFile !== undefined) {
+      await writeFile(
+        sessionFile,
+        `${JSON.stringify({
+          schemaVersion: session.schemaVersion,
+          accessToken: session.accessToken,
+          accessTokenExpiresAt: session.accessTokenExpiresAt,
+          refreshToken: session.refreshToken,
+          refreshTokenExpiresAt: session.refreshTokenExpiresAt,
+        })}\n`,
+        { encoding: "utf8", mode: 0o600, flag: "wx" },
+      );
+    }
+    output({
+      bootstrapped: true,
+      userId: session.user.id,
+      tenantId: session.tenant.id,
+      scopes: session.scopes,
+      sessionFileCreated: sessionFile !== undefined,
+    }, json);
+    return;
+  }
   const jwksPath = required(flagValue(parsed, "jwks-file"), "auth requires --jwks-file");
   const document = JSON.parse(await readFile(jwksPath, "utf8")) as IdentityJwksDocument;
   const jwks = IdentityJwksRegistry.fromDocument(document);
@@ -404,6 +474,17 @@ async function dispatchAuth(rest: string[], parsed: ParsedArgs, json: boolean): 
 }
 
 async function readOwnerOnlyTokenFile(path: string): Promise<string> {
+  return readOwnerOnlySecretFile(path, {
+    label: "auth token",
+    minimumBytes: 32,
+    maximumBytes: 16_384,
+  });
+}
+
+async function readOwnerOnlySecretFile(
+  path: string,
+  options: { label: string; minimumBytes: number; maximumBytes: number },
+): Promise<string> {
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const fileStat = await handle.stat();
@@ -412,10 +493,10 @@ async function readOwnerOnlyTokenFile(path: string): Promise<string> {
       !fileStat.isFile() ||
       (fileStat.mode & 0o077) !== 0 ||
       (effectiveUid !== undefined && fileStat.uid !== effectiveUid) ||
-      fileStat.size < 32 ||
-      fileStat.size > 16_384
+      fileStat.size < options.minimumBytes ||
+      fileStat.size > options.maximumBytes
     ) {
-      throw new Error("auth token file must be an owner-owned, owner-only regular file");
+      throw new Error(`${options.label} file must be an owner-owned, owner-only regular file`);
     }
     return (await handle.readFile("utf8")).trim();
   } finally {

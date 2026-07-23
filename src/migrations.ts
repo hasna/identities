@@ -8,8 +8,14 @@
 // against the whole store on every mutation. The api-keys table comes from the
 // canonical @hasna/contracts auth kit.
 
-import { defineMigration, type Migration } from "./generated/storage-kit/index.js";
+import {
+  DEFAULT_MIGRATION_LEDGER_TABLE,
+  defineMigration,
+  type Migration,
+  type PoolQueryClient,
+} from "./generated/storage-kit/index.js";
 import { apiKeyMigrations } from "@hasna/contracts/auth";
+import { identityLifecycleMigrations } from "./user-lifecycle.js";
 
 export const IDENTITY_STORE_TABLE = "identity_store";
 export const IDENTITY_AUDIT_TABLE = "identity_audit";
@@ -43,6 +49,32 @@ export function identitiesMigrations(): Migration[] {
       `CREATE INDEX IF NOT EXISTS ${IDENTITY_AUDIT_TABLE}_store_seq_idx
          ON ${IDENTITY_AUDIT_TABLE} (store_id, seq DESC)`,
     ),
+    ...identityLifecycleMigrations().map((migration) => defineMigration(migration.id, migration.up)),
     ...apiKeyMigrations(API_KEYS_TABLE).map((m) => defineMigration(m.id, m.sql)),
   ];
+}
+
+export async function rollbackIdentityLifecycleMigrations(
+  client: PoolQueryClient,
+  options: { allowDestructive: true; ledgerTable?: string },
+): Promise<{ rolledBack: string[] }> {
+  if (options.allowDestructive !== true) {
+    throw new Error("identity lifecycle rollback requires allowDestructive: true");
+  }
+  const ledgerTable = options.ledgerTable ?? DEFAULT_MIGRATION_LEDGER_TABLE;
+  const migrations = identityLifecycleMigrations().slice().reverse();
+  return client.transaction(async (tx) => {
+    const rolledBack: string[] = [];
+    for (const migration of migrations) {
+      const applied = await tx.get<{ id: string }>(
+        `SELECT id FROM ${ledgerTable} WHERE id = $1 FOR UPDATE`,
+        [migration.id],
+      );
+      if (applied === null) continue;
+      await tx.execute(migration.down);
+      await tx.execute(`DELETE FROM ${ledgerTable} WHERE id = $1`, [migration.id]);
+      rolledBack.push(migration.id);
+    }
+    return { rolledBack };
+  });
 }

@@ -17,6 +17,13 @@
 
 ## Unreleased
 
+- Added the authoritative Identities-owned end-user lifecycle: relational
+  users, tenants, memberships, normalized login identifiers, Argon2id
+  credentials, invite/verification/recovery state, hashed rotating refresh
+  tokens, session-family and JTI revocation, registration policy and atomic
+  first-admin bootstrap, timing-safe throttled login, mountable HTTP schemas
+  and generated SDK operations, a guarded CLI bootstrap, and reversible
+  checksum-guarded Postgres migrations.
 - Added reusable scoped JWT verification and issuance, public JWKS rotation
   status, hashed token/session-family revocation checks, and composable auth
   API and CLI surfaces for local and self-hosted consumers.

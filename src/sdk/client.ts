@@ -2,7 +2,7 @@
 // Regenerate: bun run generate:sdk
 
 // @generated from OpenAPI by @hasna/contracts SDK generator — DO NOT EDIT.
-// Source: Identities API 0.2.0
+// Source: Identities API 0.3.5
 
 export interface Identity { "id": string; "kind": "human" | "agent" | "organization" | "service"; "fullName": string; "displayName"?: string; "createdAt"?: string; "updatedAt"?: string }
 
@@ -23,6 +23,24 @@ export interface CardListResponse { "cards": Array<IdentityContactCard>; "count"
 export interface DeleteResponse { "deleted": boolean; "target": string }
 
 export interface ErrorResponse { "error": string; "reason"?: string }
+
+export interface LoginIdentifierInput { "kind": "email" | "username"; "value": string }
+
+export interface SignupInput { "identifier": LoginIdentifierInput; "password": string; "displayName": string; "inviteToken"?: string }
+
+export interface LoginInput { "identifier": LoginIdentifierInput; "password": string; "tenantId"?: string; "scopes"?: Array<string> }
+
+export interface RefreshInput { "refreshToken": string }
+
+export interface AuthSession { "schemaVersion": string; "user": Record<string, unknown>; "tenant": Record<string, unknown>; "membership": Record<string, unknown>; "scopes": Array<string>; "accessToken": string; "accessTokenExpiresAt": string; "refreshToken": string; "refreshTokenExpiresAt": string }
+
+export interface VerificationInput { "token": string }
+
+export interface RecoveryStartInput { "identifier": LoginIdentifierInput }
+
+export interface RecoveryCompleteInput { "token": string; "newPassword": string }
+
+export interface ActionAccepted { "accepted"?: boolean; "verified"?: boolean; "recovered"?: boolean; "loggedOut"?: boolean; "loggedOutAll"?: boolean }
 
 export interface IdentitiesClientOptions {
   /** Base URL, e.g. process.env.APP_API_URL. */
@@ -78,6 +96,78 @@ export class IdentitiesClient {
     }
     return data as T;
   }
+
+    /** Authenticate an end user with timing-safe errors and tenant-bound scopes */
+    async loginIdentityUser(body: LoginInput, init?: RequestInit): Promise<AuthSession> {
+      return this.request("POST", `/v1/auth/login`, {
+        body,
+        query: undefined,
+        init,
+      });
+    }
+
+    /** Revoke the current JTI and session family */
+    async logoutIdentitySession(init?: RequestInit): Promise<ActionAccepted> {
+      return this.request("POST", `/v1/auth/logout`, {
+        body: undefined,
+        query: undefined,
+        init,
+      });
+    }
+
+    /** Revoke every session family for the current user */
+    async logoutAllIdentitySessions(init?: RequestInit): Promise<ActionAccepted> {
+      return this.request("POST", `/v1/auth/logout-all`, {
+        body: undefined,
+        query: undefined,
+        init,
+      });
+    }
+
+    /** Consume a one-time recovery token, replace the credential, and revoke sessions */
+    async completeIdentityRecovery(body: RecoveryCompleteInput, init?: RequestInit): Promise<ActionAccepted> {
+      return this.request("POST", `/v1/auth/recovery/complete`, {
+        body,
+        query: undefined,
+        init,
+      });
+    }
+
+    /** Start recovery with an enumeration-safe accepted response */
+    async startIdentityRecovery(body: RecoveryStartInput, init?: RequestInit): Promise<ActionAccepted> {
+      return this.request("POST", `/v1/auth/recovery/start`, {
+        body,
+        query: undefined,
+        init,
+      });
+    }
+
+    /** Rotate a hashed refresh token; replay revokes the entire session family */
+    async refreshIdentitySession(body: RefreshInput, init?: RequestInit): Promise<AuthSession> {
+      return this.request("POST", `/v1/auth/refresh`, {
+        body,
+        query: undefined,
+        init,
+      });
+    }
+
+    /** Register an end user under the configured disabled, invite, or open policy */
+    async signupIdentityUser(body: SignupInput, init?: RequestInit): Promise<AuthSession> {
+      return this.request("POST", `/v1/auth/signup`, {
+        body,
+        query: undefined,
+        init,
+      });
+    }
+
+    /** Consume a one-time login-identifier verification token */
+    async verifyIdentityLoginIdentifier(body: VerificationInput, init?: RequestInit): Promise<ActionAccepted> {
+      return this.request("POST", `/v1/auth/verification/complete`, {
+        body,
+        query: undefined,
+        init,
+      });
+    }
 
     /** List identity contact cards */
     async listCards(init?: RequestInit): Promise<CardListResponse> {
