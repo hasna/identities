@@ -1170,3 +1170,257 @@ describe("review-C2 lifecycle security regressions", () => {
     expect(Math.abs(knownMedian - unknownMedian)).toBeLessThan(40);
   }, 10_000);
 });
+
+describe("review-F invite consumption authority regressions", () => {
+  type InviteAuthorityCase = {
+    name: string;
+    creationRole: "owner" | "admin";
+    currentState:
+      | "unchanged"
+      | "demoted-admin"
+      | "demoted-member"
+      | "suspended"
+      | "missing"
+      | "cross-tenant"
+      | "scope-lost"
+      | "user-disabled";
+    targetRole: "owner" | "admin" | "member";
+    expected: "consumed" | "invite_invalid";
+  };
+
+  const cases: readonly InviteAuthorityCase[] = [
+    {
+      name: "active owner consumes an owner invite",
+      creationRole: "owner",
+      currentState: "unchanged",
+      targetRole: "owner",
+      expected: "consumed",
+    },
+    {
+      name: "active owner consumes an admin invite",
+      creationRole: "owner",
+      currentState: "unchanged",
+      targetRole: "admin",
+      expected: "consumed",
+    },
+    {
+      name: "active owner consumes a member invite",
+      creationRole: "owner",
+      currentState: "unchanged",
+      targetRole: "member",
+      expected: "consumed",
+    },
+    {
+      name: "active admin consumes an admin invite",
+      creationRole: "admin",
+      currentState: "unchanged",
+      targetRole: "admin",
+      expected: "consumed",
+    },
+    {
+      name: "active admin consumes a member invite",
+      creationRole: "admin",
+      currentState: "unchanged",
+      targetRole: "member",
+      expected: "consumed",
+    },
+    {
+      name: "owner demoted to admin cannot consume an owner invite",
+      creationRole: "owner",
+      currentState: "demoted-admin",
+      targetRole: "owner",
+      expected: "invite_invalid",
+    },
+    {
+      name: "owner demoted to admin can consume a member invite",
+      creationRole: "owner",
+      currentState: "demoted-admin",
+      targetRole: "member",
+      expected: "consumed",
+    },
+    {
+      name: "owner demoted to member cannot consume a member invite",
+      creationRole: "owner",
+      currentState: "demoted-member",
+      targetRole: "member",
+      expected: "invite_invalid",
+    },
+    {
+      name: "admin demoted to member cannot consume a member invite",
+      creationRole: "admin",
+      currentState: "demoted-member",
+      targetRole: "member",
+      expected: "invite_invalid",
+    },
+    {
+      name: "suspended creator membership cannot consume an invite",
+      creationRole: "owner",
+      currentState: "suspended",
+      targetRole: "member",
+      expected: "invite_invalid",
+    },
+    {
+      name: "missing creator membership cannot consume an invite",
+      creationRole: "owner",
+      currentState: "missing",
+      targetRole: "member",
+      expected: "invite_invalid",
+    },
+    {
+      name: "cross-tenant creator membership cannot consume an invite",
+      creationRole: "owner",
+      currentState: "cross-tenant",
+      targetRole: "member",
+      expected: "invite_invalid",
+    },
+    {
+      name: "creator scope loss invalidates a pending invite",
+      creationRole: "owner",
+      currentState: "scope-lost",
+      targetRole: "member",
+      expected: "invite_invalid",
+    },
+    {
+      name: "disabled creator user cannot consume an invite",
+      creationRole: "owner",
+      currentState: "user-disabled",
+      targetRole: "member",
+      expected: "invite_invalid",
+    },
+  ];
+
+  test("requires the creator to remain an active owner or admin with current authority", async () => {
+    for (const [index, scenario] of cases.entries()) {
+      const { service, store } = fixture("invite");
+      const owner = await firstAdmin(service, `review-f-owner-${index}@example.test`);
+      let creator = owner;
+      if (scenario.creationRole === "admin") {
+        const creatorIdentifier = `review-f-admin-${index}@example.test`;
+        const creatorInvite = await service.createInvite({
+          actorAccessToken: owner.accessToken,
+          tenantId: owner.tenant.id,
+          identifier: { kind: "email", value: creatorIdentifier },
+          role: "admin",
+          scopes: ["runs:read", DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE],
+        });
+        creator = await service.signup({
+          identifier: { kind: "email", value: creatorIdentifier },
+          password: "a sufficiently strong password",
+          displayName: `Review F Admin ${index}`,
+          inviteToken: creatorInvite.token,
+        });
+      }
+
+      const targetIdentifier = `review-f-target-${index}@example.test`;
+      const pending = await service.createInvite({
+        actorAccessToken: creator.accessToken,
+        tenantId: owner.tenant.id,
+        identifier: { kind: "email", value: targetIdentifier },
+        role: scenario.targetRole,
+        scopes: ["runs:read"],
+      });
+      const mutable = store as unknown as {
+        state: {
+          users: Array<{
+            id: string;
+            status: "active" | "disabled" | "deleted";
+          }>;
+          tenants: Array<{
+            id: string;
+            slug: string;
+            name: string;
+            allowedScopes?: string[];
+            createdAt: string;
+          }>;
+          memberships: Array<{
+            id: string;
+            userId: string;
+            tenantId: string;
+            role: "owner" | "admin" | "member";
+            scopes: string[];
+            status?: "active" | "suspended";
+            createdAt: string;
+          }>;
+        };
+      };
+      const creatorMembershipIndex = mutable.state.memberships.findIndex(
+        (membership) =>
+          membership.userId === creator.user.id && membership.tenantId === owner.tenant.id,
+      );
+      const creatorMembership = mutable.state.memberships[creatorMembershipIndex]!;
+      if (scenario.currentState === "demoted-admin") {
+        creatorMembership.role = "admin";
+      } else if (scenario.currentState === "demoted-member") {
+        creatorMembership.role = "member";
+      } else if (scenario.currentState === "suspended") {
+        creatorMembership.status = "suspended";
+      } else if (scenario.currentState === "missing") {
+        mutable.state.memberships.splice(creatorMembershipIndex, 1);
+      } else if (scenario.currentState === "cross-tenant") {
+        const otherTenantId = `ten_review_f_other_${index}`;
+        mutable.state.tenants.push({
+          id: otherTenantId,
+          slug: `review-f-other-${index}`,
+          name: `Review F Other ${index}`,
+          allowedScopes: ["runs:read", DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE],
+          createdAt: new Date().toISOString(),
+        });
+        creatorMembership.tenantId = otherTenantId;
+      } else if (scenario.currentState === "scope-lost") {
+        creatorMembership.scopes = creatorMembership.scopes.filter(
+          (scope) => scope !== DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE,
+        );
+      } else if (scenario.currentState === "user-disabled") {
+        mutable.state.users.find((user) => user.id === creator.user.id)!.status = "disabled";
+      }
+
+      const before = store.snapshot();
+      const signup = service.signup({
+        identifier: { kind: "email", value: targetIdentifier },
+        password: "a sufficiently strong password",
+        displayName: `Review F Target ${index}`,
+        inviteToken: pending.token,
+      });
+      if (scenario.expected === "consumed") {
+        const session = await signup;
+        expect({
+          scenario: scenario.name,
+          role: session.membership.role,
+        }).toEqual({
+          scenario: scenario.name,
+          role: scenario.targetRole,
+        });
+      } else {
+        expect({
+          scenario: scenario.name,
+          reason: await errorReason(signup),
+        }).toEqual({
+          scenario: scenario.name,
+          reason: "invite_invalid",
+        });
+      }
+
+      const after = store.snapshot();
+      const persistedInvite = after.invites.find((invite) => invite.id === pending.id);
+      expect({
+        scenario: scenario.name,
+        consumed: persistedInvite?.consumedAt !== undefined,
+        userDelta: after.users.length - before.users.length,
+        identifierDelta: after.loginIdentifiers.length - before.loginIdentifiers.length,
+        credentialDelta: after.credentials.length - before.credentials.length,
+        membershipDelta: after.memberships.length - before.memberships.length,
+        familyDelta: after.sessionFamilies.length - before.sessionFamilies.length,
+        refreshDelta: after.refreshTokens.length - before.refreshTokens.length,
+      }).toEqual({
+        scenario: scenario.name,
+        consumed: scenario.expected === "consumed",
+        userDelta: scenario.expected === "consumed" ? 1 : 0,
+        identifierDelta: scenario.expected === "consumed" ? 1 : 0,
+        credentialDelta: scenario.expected === "consumed" ? 1 : 0,
+        membershipDelta: scenario.expected === "consumed" ? 1 : 0,
+        familyDelta: scenario.expected === "consumed" ? 1 : 0,
+        refreshDelta: scenario.expected === "consumed" ? 1 : 0,
+      });
+    }
+  });
+});

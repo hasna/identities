@@ -1363,6 +1363,466 @@ describeLive("PgIdentityLifecycleStore live Postgres", () => {
     })).rejects.toMatchObject({ reason: "forbidden" });
   });
 
+  test("revalidates invite creator authority after role changes with locked atomic consumption", async () => {
+    type InviteAuthorityCase = {
+      name: string;
+      creationRole: "owner" | "admin";
+      currentState:
+        | "unchanged"
+        | "demoted-admin"
+        | "demoted-member"
+        | "suspended"
+        | "missing"
+        | "cross-tenant"
+        | "scope-lost"
+        | "user-disabled";
+      targetRole: "owner" | "admin" | "member";
+      expected: "consumed" | "invite_invalid";
+      concurrent?: boolean;
+    };
+    const cases: readonly InviteAuthorityCase[] = [
+      {
+        name: "active owner consumes an owner invite",
+        creationRole: "owner",
+        currentState: "unchanged",
+        targetRole: "owner",
+        expected: "consumed",
+      },
+      {
+        name: "active owner consumes an admin invite",
+        creationRole: "owner",
+        currentState: "unchanged",
+        targetRole: "admin",
+        expected: "consumed",
+      },
+      {
+        name: "active owner consumes a member invite",
+        creationRole: "owner",
+        currentState: "unchanged",
+        targetRole: "member",
+        expected: "consumed",
+      },
+      {
+        name: "active admin consumes an admin invite",
+        creationRole: "admin",
+        currentState: "unchanged",
+        targetRole: "admin",
+        expected: "consumed",
+      },
+      {
+        name: "active admin consumes a member invite",
+        creationRole: "admin",
+        currentState: "unchanged",
+        targetRole: "member",
+        expected: "consumed",
+      },
+      {
+        name: "owner demoted to admin cannot consume an owner invite",
+        creationRole: "owner",
+        currentState: "demoted-admin",
+        targetRole: "owner",
+        expected: "invite_invalid",
+      },
+      {
+        name: "owner demoted to admin can consume a member invite",
+        creationRole: "owner",
+        currentState: "demoted-admin",
+        targetRole: "member",
+        expected: "consumed",
+      },
+      {
+        name: "owner demoted to member cannot consume a member invite",
+        creationRole: "owner",
+        currentState: "demoted-member",
+        targetRole: "member",
+        expected: "invite_invalid",
+        concurrent: true,
+      },
+      {
+        name: "admin demoted to member cannot consume a member invite",
+        creationRole: "admin",
+        currentState: "demoted-member",
+        targetRole: "member",
+        expected: "invite_invalid",
+      },
+      {
+        name: "suspended creator membership cannot consume an invite",
+        creationRole: "owner",
+        currentState: "suspended",
+        targetRole: "member",
+        expected: "invite_invalid",
+      },
+      {
+        name: "missing creator membership cannot consume an invite",
+        creationRole: "owner",
+        currentState: "missing",
+        targetRole: "member",
+        expected: "invite_invalid",
+      },
+      {
+        name: "cross-tenant creator membership cannot consume an invite",
+        creationRole: "owner",
+        currentState: "cross-tenant",
+        targetRole: "member",
+        expected: "invite_invalid",
+      },
+      {
+        name: "creator scope loss invalidates a pending invite",
+        creationRole: "owner",
+        currentState: "scope-lost",
+        targetRole: "member",
+        expected: "invite_invalid",
+      },
+      {
+        name: "disabled creator user cannot consume an invite",
+        creationRole: "owner",
+        currentState: "user-disabled",
+        targetRole: "member",
+        expected: "invite_invalid",
+      },
+    ];
+    const live = service("invite");
+    let ownerUser = await client.get<{ user_id: string }>(
+      `SELECT identifier.user_id
+       FROM identity_login_identifiers identifier
+       WHERE identifier.kind = 'email'
+         AND identifier.normalized_value = 'owner@pg.example.test'`,
+    );
+    if (ownerUser === null) {
+      await live.service.bootstrapFirstAdmin({
+        identifier: { kind: "email", value: "owner@pg.example.test" },
+        password: "correct horse battery staple",
+        displayName: "PG Owner",
+      });
+      ownerUser = await client.one<{ user_id: string }>(
+        `SELECT identifier.user_id
+         FROM identity_login_identifiers identifier
+         WHERE identifier.kind = 'email'
+           AND identifier.normalized_value = 'owner@pg.example.test'`,
+      );
+    }
+    const ownerTenant = await client.one<{ id: string }>(
+      `SELECT id
+       FROM identity_tenants
+       WHERE slug = 'infinity-pg'`,
+    );
+    const ownerScopes = [
+      "runs:read",
+      "runs:write",
+      DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE,
+      "identities:platform:admin",
+    ];
+    await client.execute(
+      "UPDATE identity_users SET status = 'active', disabled_at = NULL WHERE id = $1",
+      [ownerUser.user_id],
+    );
+    await client.execute(
+      `UPDATE identity_tenants
+       SET allowed_scopes = $2::jsonb
+       WHERE id = $1`,
+      [ownerTenant.id, JSON.stringify(ownerScopes)],
+    );
+    await client.execute(
+      `UPDATE identity_memberships
+       SET role = 'owner', scopes = $3::jsonb, status = 'active', tenant_id = $1
+       WHERE user_id = $2`,
+      [ownerTenant.id, ownerUser.user_id, JSON.stringify(ownerScopes)],
+    );
+    const owner = await live.service.login({
+      identifier: { kind: "email", value: "owner@pg.example.test" },
+      password: "correct horse battery staple",
+      tenantId: ownerTenant.id,
+      throttleKey: "review-f-owner",
+    });
+    const adminIdentifier = "pg-review-f-admin@example.test";
+    const adminScopes = ["runs:read", DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE];
+    const adminInvite = await live.service.createInvite({
+      actorAccessToken: owner.accessToken,
+      tenantId: ownerTenant.id,
+      identifier: { kind: "email", value: adminIdentifier },
+      role: "admin",
+      scopes: adminScopes,
+    });
+    const admin = await live.service.signup({
+      identifier: { kind: "email", value: adminIdentifier },
+      password: "a sufficiently strong password",
+      displayName: "PG Review F Admin",
+      inviteToken: adminInvite.token,
+    });
+    const otherTenantId = "ten_pg_review_f_other";
+    await client.execute(
+      `INSERT INTO identity_tenants (id, slug, name, allowed_scopes, created_at)
+       VALUES ($1, 'pg-review-f-other', 'PG Review F Other', $2::jsonb, NOW())
+       ON CONFLICT (id) DO UPDATE SET allowed_scopes = EXCLUDED.allowed_scopes`,
+      [otherTenantId, JSON.stringify(ownerScopes)],
+    );
+
+    const restoreCreator = async (input: {
+      userId: string;
+      membershipId: string;
+      role: "owner" | "admin";
+      scopes: readonly string[];
+      createdAt: string;
+    }): Promise<void> => {
+      await client.execute(
+        "UPDATE identity_users SET status = 'active', disabled_at = NULL WHERE id = $1",
+        [input.userId],
+      );
+      await client.execute(
+        `INSERT INTO identity_memberships
+           (id, tenant_id, user_id, role, scopes, status, created_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, 'active', $6)
+         ON CONFLICT (id) DO UPDATE SET
+           tenant_id = EXCLUDED.tenant_id,
+           user_id = EXCLUDED.user_id,
+           role = EXCLUDED.role,
+           scopes = EXCLUDED.scopes,
+           status = EXCLUDED.status`,
+        [
+          input.membershipId,
+          ownerTenant.id,
+          input.userId,
+          input.role,
+          JSON.stringify(input.scopes),
+          input.createdAt,
+        ],
+      );
+    };
+    const cleanupUser = async (userId: string): Promise<void> => {
+      await client.transaction(async (tx) => {
+        await tx.execute(
+          "DELETE FROM identity_invites WHERE created_by_user_id = $1 OR consumed_by_user_id = $1",
+          [userId],
+        );
+        await tx.execute("DELETE FROM identity_jti_revocations WHERE user_id = $1", [userId]);
+        await tx.execute("DELETE FROM identity_issued_access_tokens WHERE user_id = $1", [userId]);
+        await tx.execute(
+          `DELETE FROM identity_refresh_tokens
+           WHERE family_id IN (SELECT id FROM identity_session_families WHERE user_id = $1)`,
+          [userId],
+        );
+        await tx.execute("DELETE FROM identity_session_families WHERE user_id = $1", [userId]);
+        await tx.execute("DELETE FROM identity_one_time_tokens WHERE user_id = $1", [userId]);
+        await tx.execute("DELETE FROM identity_password_credentials WHERE user_id = $1", [userId]);
+        await tx.execute("DELETE FROM identity_memberships WHERE user_id = $1", [userId]);
+        await tx.execute(
+          `DELETE FROM identity_login_identifier_canonicalization_audit
+           WHERE identifier_id IN (
+             SELECT id FROM identity_login_identifiers WHERE user_id = $1
+           )`,
+          [userId],
+        );
+        await tx.execute("DELETE FROM identity_login_identifiers WHERE user_id = $1", [userId]);
+        await tx.execute("DELETE FROM identity_users WHERE id = $1", [userId]);
+      });
+    };
+    const creatorByRole = {
+      owner: {
+        session: owner,
+        userId: owner.user.id,
+        membershipId: owner.membership.id,
+        role: "owner" as const,
+        scopes: ownerScopes,
+        createdAt: owner.membership.createdAt,
+      },
+      admin: {
+        session: admin,
+        userId: admin.user.id,
+        membershipId: admin.membership.id,
+        role: "admin" as const,
+        scopes: adminScopes,
+        createdAt: admin.membership.createdAt,
+      },
+    };
+
+    try {
+      for (const [index, scenario] of cases.entries()) {
+        const creator = creatorByRole[scenario.creationRole];
+        await restoreCreator(creator);
+        const targetIdentifier = `pg-review-f-target-${index}@example.test`;
+        const pending = await live.service.createInvite({
+          actorAccessToken: creator.session.accessToken,
+          tenantId: ownerTenant.id,
+          identifier: { kind: "email", value: targetIdentifier },
+          role: scenario.targetRole,
+          scopes: ["runs:read"],
+        });
+        let blocker: Awaited<ReturnType<typeof client.pool.connect>> | undefined;
+        let blockerTransactionOpen = false;
+        let signupResolved = false;
+        let observedLockWait = false;
+        try {
+          if (scenario.concurrent === true) {
+            blocker = await client.pool.connect();
+            await blocker.query("BEGIN");
+            blockerTransactionOpen = true;
+            await blocker.query(
+              "UPDATE identity_memberships SET role = 'member' WHERE id = $1",
+              [creator.membershipId],
+            );
+          } else if (scenario.currentState === "demoted-admin") {
+            await client.execute(
+              "UPDATE identity_memberships SET role = 'admin' WHERE id = $1",
+              [creator.membershipId],
+            );
+          } else if (scenario.currentState === "demoted-member") {
+            await client.execute(
+              "UPDATE identity_memberships SET role = 'member' WHERE id = $1",
+              [creator.membershipId],
+            );
+          } else if (scenario.currentState === "suspended") {
+            await client.execute(
+              "UPDATE identity_memberships SET status = 'suspended' WHERE id = $1",
+              [creator.membershipId],
+            );
+          } else if (scenario.currentState === "missing") {
+            await client.execute(
+              "DELETE FROM identity_memberships WHERE id = $1",
+              [creator.membershipId],
+            );
+          } else if (scenario.currentState === "cross-tenant") {
+            await client.execute(
+              "UPDATE identity_memberships SET tenant_id = $2 WHERE id = $1",
+              [creator.membershipId, otherTenantId],
+            );
+          } else if (scenario.currentState === "scope-lost") {
+            await client.execute(
+              "UPDATE identity_memberships SET scopes = scopes - $2 WHERE id = $1",
+              [creator.membershipId, DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE],
+            );
+          } else if (scenario.currentState === "user-disabled") {
+            await client.execute(
+              "UPDATE identity_users SET status = 'disabled', disabled_at = NOW() WHERE id = $1",
+              [creator.userId],
+            );
+          }
+
+          const signup = live.service.signup({
+            identifier: { kind: "email", value: targetIdentifier },
+            password: "a sufficiently strong password",
+            displayName: `PG Review F Target ${index}`,
+            inviteToken: pending.token,
+          });
+          void signup.finally(() => {
+            signupResolved = true;
+          }).catch(() => undefined);
+          if (scenario.concurrent === true) {
+            for (let attempt = 0; attempt < 200; attempt += 1) {
+              const state = await client.one<{ waiting: boolean }>(
+                `SELECT EXISTS (
+                   SELECT 1
+                   FROM pg_stat_activity
+                   WHERE datname = current_database()
+                     AND pid <> pg_backend_pid()
+                     AND wait_event_type = 'Lock'
+                     AND query LIKE '%FROM identity_memberships%'
+                     AND query LIKE '%FOR UPDATE OF membership, creator%'
+                 ) AS waiting`,
+              );
+              if (state.waiting) {
+                observedLockWait = true;
+                break;
+              }
+              if (signupResolved) break;
+              await new Promise<void>((resolve) => setTimeout(resolve, 5));
+            }
+            await blocker!.query("COMMIT");
+            blockerTransactionOpen = false;
+          }
+          const outcome = await signup.then(
+            (session) => ({ reason: "consumed", role: session.membership.role }),
+            (error: unknown) => {
+              if (!(error instanceof IdentityLifecycleError)) throw error;
+              return { reason: error.reason, role: null };
+            },
+          );
+          const persisted = await client.one<{
+            consumed_at: Date | string | null;
+            users: string;
+            memberships: string;
+            sessions: string;
+            role: "owner" | "admin" | "member" | null;
+          }>(
+            `SELECT
+               invite.consumed_at,
+               (
+                 SELECT count(*)::text
+                 FROM identity_users target_user
+                 JOIN identity_login_identifiers identifier
+                   ON identifier.user_id = target_user.id
+                 WHERE identifier.kind = 'email'
+                   AND identifier.normalized_value = $2
+               ) AS users,
+               (
+                 SELECT count(*)::text
+                 FROM identity_memberships target_membership
+                 JOIN identity_login_identifiers identifier
+                   ON identifier.user_id = target_membership.user_id
+                 WHERE identifier.kind = 'email'
+                   AND identifier.normalized_value = $2
+               ) AS memberships,
+               (
+                 SELECT count(*)::text
+                 FROM identity_session_families family
+                 JOIN identity_login_identifiers identifier
+                   ON identifier.user_id = family.user_id
+                 WHERE identifier.kind = 'email'
+                   AND identifier.normalized_value = $2
+               ) AS sessions,
+               (
+                 SELECT target_membership.role
+                 FROM identity_memberships target_membership
+                 JOIN identity_login_identifiers identifier
+                   ON identifier.user_id = target_membership.user_id
+                 WHERE identifier.kind = 'email'
+                   AND identifier.normalized_value = $2
+                 LIMIT 1
+               ) AS role
+             FROM identity_invites invite
+             WHERE invite.id = $1`,
+            [pending.id, targetIdentifier],
+          );
+          expect({
+            scenario: scenario.name,
+            reason: outcome.reason,
+            role: outcome.role,
+            consumed: persisted.consumed_at !== null,
+            users: persisted.users,
+            memberships: persisted.memberships,
+            sessions: persisted.sessions,
+            lockWait: scenario.concurrent === true ? observedLockWait : undefined,
+          }).toEqual({
+            scenario: scenario.name,
+            reason: scenario.expected,
+            role: scenario.expected === "consumed" ? scenario.targetRole : null,
+            consumed: scenario.expected === "consumed",
+            users: scenario.expected === "consumed" ? "1" : "0",
+            memberships: scenario.expected === "consumed" ? "1" : "0",
+            sessions: scenario.expected === "consumed" ? "1" : "0",
+            lockWait: scenario.concurrent === true ? true : undefined,
+          });
+        } finally {
+          if (blockerTransactionOpen) await blocker!.query("ROLLBACK");
+          blocker?.release();
+          await client.execute("DELETE FROM identity_invites WHERE id = $1", [pending.id]);
+          const target = await client.get<{ user_id: string }>(
+            `SELECT user_id
+             FROM identity_login_identifiers
+             WHERE kind = 'email' AND normalized_value = $1`,
+            [targetIdentifier],
+          );
+          if (target !== null) await cleanupUser(target.user_id);
+          await restoreCreator(creator);
+        }
+      }
+    } finally {
+      await client.execute("DELETE FROM identity_invites WHERE id = $1", [adminInvite.id]);
+      await cleanupUser(admin.user.id);
+      await restoreCreator(creatorByRole.owner);
+      await client.execute("DELETE FROM identity_tenants WHERE id = $1", [otherTenantId]);
+    }
+  }, 60_000);
+
   test("locks refresh authority rows until a concurrent membership narrowing commits", async () => {
     const live = service("invite");
     const ownerTenant = await client.one<{ id: string }>(

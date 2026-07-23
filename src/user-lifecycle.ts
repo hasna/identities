@@ -556,6 +556,7 @@ export class InMemoryIdentityLifecycleStore implements IdentityLifecycleStore {
         if (
           creator === undefined ||
           creatorMembership === undefined ||
+          (creatorMembership.role !== "owner" && creatorMembership.role !== "admin") ||
           !roleCanAssign(creatorMembership.role, invite.role) ||
           !creatorMembership.scopes.includes(invite.managementScope) ||
           !isScopeSubset(invite.scopes, creatorMembership.scopes) ||

@@ -356,6 +356,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
             creator === null ||
             creator.user_status !== "active" ||
             creator.membership_status !== "active" ||
+            (creator.role !== "owner" && creator.role !== "admin") ||
             !roleCanAssign(creator.role, invite.role) ||
             !parseScopes(creator.scopes).includes(invite.management_scope) ||
             !scopeSubset(inviteScopes, parseScopes(creator.scopes)) ||
