@@ -184,6 +184,390 @@ function administrationParityState(
   return { actorUserId, targetUserId, tenantId, snapshot };
 }
 
+type MembershipSuspensionParityCase = {
+  name: string;
+  tenantState?: "present" | "missing";
+  actorMembershipStatus?: IdentityMembershipStatus;
+  targetUserStatus?: IdentityUserStatus | "missing";
+  targetMembershipStatus?: IdentityMembershipStatus | "missing";
+  targetTenant?: "requested" | "other";
+  expectedOutcome: "suspended" | "not_found" | "forbidden";
+  expectedMemoryTargetStatus: IdentityMembershipStatus | "missing";
+};
+
+const membershipSuspensionParityCases: readonly MembershipSuspensionParityCase[] = [
+  {
+    name: "suspends an active target membership",
+    expectedOutcome: "suspended",
+    expectedMemoryTargetStatus: "suspended",
+  },
+  {
+    name: "keeps an already suspended target membership suspended",
+    targetMembershipStatus: "suspended",
+    expectedOutcome: "suspended",
+    expectedMemoryTargetStatus: "suspended",
+  },
+  {
+    name: "permits suspension when the existing target user is disabled",
+    targetUserStatus: "disabled",
+    expectedOutcome: "suspended",
+    expectedMemoryTargetStatus: "suspended",
+  },
+  {
+    name: "denies a suspended actor membership without mutating the target",
+    actorMembershipStatus: "suspended",
+    expectedOutcome: "forbidden",
+    expectedMemoryTargetStatus: "active",
+  },
+  {
+    name: "treats orphan memberships for a missing requested tenant as not found",
+    tenantState: "missing",
+    expectedOutcome: "not_found",
+    expectedMemoryTargetStatus: "active",
+  },
+  {
+    name: "treats an orphan target membership for a missing target user as not found",
+    targetUserStatus: "missing",
+    expectedOutcome: "not_found",
+    expectedMemoryTargetStatus: "active",
+  },
+  {
+    name: "treats a missing target membership as not found",
+    targetMembershipStatus: "missing",
+    expectedOutcome: "not_found",
+    expectedMemoryTargetStatus: "missing",
+  },
+  {
+    name: "does not mutate a cross-tenant target membership",
+    targetTenant: "other",
+    expectedOutcome: "not_found",
+    expectedMemoryTargetStatus: "active",
+  },
+];
+
+function membershipSuspensionParityState(
+  index: number,
+  scenario: MembershipSuspensionParityCase,
+): {
+  actorUserId: string;
+  targetUserId: string;
+  tenantId: string;
+  targetMembershipId: string;
+  snapshot: IdentityLifecycleSnapshot;
+} {
+  const suffix = index.toString().padStart(2, "0");
+  const actorUserId = `usr_review_e_actor_${suffix}`;
+  const targetUserId = `usr_review_e_target_${suffix}`;
+  const tenantId = `ten_review_e_requested_${suffix}`;
+  const otherTenantId = `ten_review_e_other_${suffix}`;
+  const targetMembershipId = `mem_review_e_target_${suffix}`;
+  const createdAt = "2026-07-23T00:00:00.000Z";
+  const targetUserStatus = scenario.targetUserStatus ?? "active";
+  const targetMembershipStatus = scenario.targetMembershipStatus ?? "active";
+  const targetTenant = scenario.targetTenant ?? "requested";
+  const snapshot: IdentityLifecycleSnapshot = {
+    users: [
+      {
+        id: actorUserId,
+        status: "active",
+        displayName: `Suspension actor ${suffix}`,
+        createdAt,
+        updatedAt: createdAt,
+      },
+      ...(targetUserStatus === "missing"
+        ? []
+        : [{
+            id: targetUserId,
+            status: targetUserStatus,
+            displayName: `Suspension target ${suffix}`,
+            createdAt,
+            updatedAt: createdAt,
+          }]),
+    ],
+    tenants: [
+      ...(scenario.tenantState === "missing"
+        ? []
+        : [{
+            id: tenantId,
+            slug: `review-e-requested-${suffix}`,
+            name: `Suspension requested tenant ${suffix}`,
+            allowedScopes: ["runs:read"],
+            createdAt,
+          }]),
+      ...(targetTenant === "other"
+        ? [{
+            id: otherTenantId,
+            slug: `review-e-other-${suffix}`,
+            name: `Suspension other tenant ${suffix}`,
+            allowedScopes: ["runs:read"],
+            createdAt,
+          }]
+        : []),
+    ],
+    memberships: [
+      {
+        id: `mem_review_e_actor_${suffix}`,
+        tenantId,
+        userId: actorUserId,
+        role: "owner",
+        scopes: ["runs:read"],
+        status: scenario.actorMembershipStatus ?? "active",
+        createdAt,
+      },
+      ...(targetMembershipStatus === "missing"
+        ? []
+        : [{
+            id: targetMembershipId,
+            tenantId: targetTenant === "requested" ? tenantId : otherTenantId,
+            userId: targetUserId,
+            role: "member" as const,
+            scopes: ["runs:read"],
+            status: targetMembershipStatus,
+            createdAt,
+          }]),
+    ],
+    loginIdentifiers: [],
+    credentials: [],
+    invites: [],
+    sessionFamilies: [],
+    refreshTokens: [],
+    oneTimeTokens: [],
+    loginThrottles: [],
+    jtiRevocations: [],
+    issuedAccessTokens: [],
+  };
+  return { actorUserId, targetUserId, tenantId, targetMembershipId, snapshot };
+}
+
+async function observeMembershipSuspension(
+  store: InMemoryIdentityLifecycleStore | PgIdentityLifecycleStore,
+  fixture: ReturnType<typeof membershipSuspensionParityState>,
+): Promise<string> {
+  try {
+    const membership = await store.suspendMembership({
+      actorUserId: fixture.actorUserId,
+      tenantId: fixture.tenantId,
+      targetUserId: fixture.targetUserId,
+      now: new Date("2026-07-23T01:00:00.000Z"),
+    });
+    return membership?.status ?? "not_found";
+  } catch (error) {
+    if (error instanceof IdentityLifecycleError) return error.reason;
+    throw error;
+  }
+}
+
+const REVIEW_E_PLATFORM_AUTHORITY_SCOPE = "identities:users:manage";
+
+function orphanTargetRoleMutationState(): IdentityLifecycleSnapshot {
+  const createdAt = "2026-07-23T00:00:00.000Z";
+  return {
+    users: [
+      {
+        id: "usr_review_e_mutation_actor",
+        status: "active",
+        displayName: "Mutation actor",
+        createdAt,
+        updatedAt: createdAt,
+      },
+      {
+        id: "usr_review_e_mutation_target",
+        status: "active",
+        displayName: "Mutation target",
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ],
+    tenants: [{
+      id: "ten_review_e_mutation_actor",
+      slug: "review-e-mutation-actor",
+      name: "Mutation actor tenant",
+      allowedScopes: [REVIEW_E_PLATFORM_AUTHORITY_SCOPE],
+      createdAt,
+    }],
+    memberships: [
+      {
+        id: "mem_review_e_mutation_actor",
+        tenantId: "ten_review_e_mutation_actor",
+        userId: "usr_review_e_mutation_actor",
+        role: "owner",
+        scopes: [REVIEW_E_PLATFORM_AUTHORITY_SCOPE],
+        status: "active",
+        createdAt,
+      },
+      {
+        id: "mem_review_e_mutation_orphan_target",
+        tenantId: "ten_review_e_mutation_missing",
+        userId: "usr_review_e_mutation_target",
+        role: "member",
+        scopes: ["runs:read"],
+        status: "active",
+        createdAt,
+      },
+    ],
+    loginIdentifiers: [],
+    credentials: [],
+    invites: [],
+    sessionFamilies: [],
+    refreshTokens: [],
+    oneTimeTokens: [],
+    loginThrottles: [],
+    jtiRevocations: [],
+    issuedAccessTokens: [],
+  };
+}
+
+async function observeUserSecurityMutation(
+  store: InMemoryIdentityLifecycleStore | PgIdentityLifecycleStore,
+): Promise<string> {
+  try {
+    const user = await store.mutateUserSecurityState({
+      actorUserId: "usr_review_e_mutation_actor",
+      actorTenantId: "ten_review_e_mutation_actor",
+      actorTokenScopes: [REVIEW_E_PLATFORM_AUTHORITY_SCOPE],
+      platformAuthorityScope: REVIEW_E_PLATFORM_AUTHORITY_SCOPE,
+      platformAuthorityTenantSlugs: ["review-e-mutation-actor"],
+      targetUserId: "usr_review_e_mutation_target",
+      status: "disabled",
+      now: new Date("2026-07-23T01:00:00.000Z"),
+    });
+    return user?.status ?? "not_found";
+  } catch (error) {
+    if (error instanceof IdentityLifecycleError) return error.reason;
+    throw error;
+  }
+}
+
+type IssuedTokenParityCase = {
+  name: string;
+  userStatus?: IdentityUserStatus | "missing";
+  tenantState?: "present" | "missing";
+  membershipStatus?: IdentityMembershipStatus | "missing";
+  expectedOutcome: "recorded" | "invalid_credentials";
+};
+
+const issuedTokenParityCases: readonly IssuedTokenParityCase[] = [
+  {
+    name: "records for an active user, tenant, membership, and family",
+    expectedOutcome: "recorded",
+  },
+  {
+    name: "rejects an active family whose user is missing",
+    userStatus: "missing",
+    expectedOutcome: "invalid_credentials",
+  },
+  {
+    name: "rejects an active family whose user is disabled",
+    userStatus: "disabled",
+    expectedOutcome: "invalid_credentials",
+  },
+  {
+    name: "rejects an active family whose tenant is missing",
+    tenantState: "missing",
+    expectedOutcome: "invalid_credentials",
+  },
+  {
+    name: "rejects an active family whose membership is missing",
+    membershipStatus: "missing",
+    expectedOutcome: "invalid_credentials",
+  },
+  {
+    name: "rejects an active family whose membership is suspended",
+    membershipStatus: "suspended",
+    expectedOutcome: "invalid_credentials",
+  },
+];
+
+function issuedTokenParityState(
+  index: number,
+  scenario: IssuedTokenParityCase,
+): {
+  snapshot: IdentityLifecycleSnapshot;
+  input: Parameters<InMemoryIdentityLifecycleStore["recordIssuedAccessToken"]>[0];
+} {
+  const suffix = index.toString().padStart(2, "0");
+  const userId = `usr_review_e_issued_${suffix}`;
+  const tenantId = `ten_review_e_issued_${suffix}`;
+  const familyId = `fam_review_e_issued_${suffix}`;
+  const createdAt = "2026-07-23T00:00:00.000Z";
+  const expiresAt = "2026-07-24T00:00:00.000Z";
+  const userStatus = scenario.userStatus ?? "active";
+  const membershipStatus = scenario.membershipStatus ?? "active";
+  const snapshot: IdentityLifecycleSnapshot = {
+    users: userStatus === "missing"
+      ? []
+      : [{
+          id: userId,
+          status: userStatus,
+          displayName: `Issued-token user ${suffix}`,
+          createdAt,
+          updatedAt: createdAt,
+        }],
+    tenants: scenario.tenantState === "missing"
+      ? []
+      : [{
+          id: tenantId,
+          slug: `review-e-issued-${suffix}`,
+          name: `Issued-token tenant ${suffix}`,
+          allowedScopes: ["runs:read"],
+          createdAt,
+        }],
+    memberships: membershipStatus === "missing"
+      ? []
+      : [{
+          id: `mem_review_e_issued_${suffix}`,
+          tenantId,
+          userId,
+          role: "member",
+          scopes: ["runs:read"],
+          status: membershipStatus,
+          createdAt,
+        }],
+    loginIdentifiers: [],
+    credentials: [],
+    invites: [],
+    sessionFamilies: [{
+      id: familyId,
+      userId,
+      tenantId,
+      scopes: ["runs:read"],
+      status: "active",
+      expiresAt,
+      createdAt,
+      updatedAt: createdAt,
+    }],
+    refreshTokens: [],
+    oneTimeTokens: [],
+    loginThrottles: [],
+    jtiRevocations: [],
+    issuedAccessTokens: [],
+  };
+  return {
+    snapshot,
+    input: {
+      jtiHash: `jti_review_e_issued_${suffix}`,
+      familyId,
+      userId,
+      tenantId,
+      expiresAt,
+      issuedAt: createdAt,
+    },
+  };
+}
+
+async function observeIssuedAccessTokenRecording(
+  store: InMemoryIdentityLifecycleStore | PgIdentityLifecycleStore,
+  input: Parameters<InMemoryIdentityLifecycleStore["recordIssuedAccessToken"]>[0],
+): Promise<string> {
+  try {
+    await store.recordIssuedAccessToken(input);
+    return "recorded";
+  } catch (error) {
+    if (error instanceof IdentityLifecycleError) return error.reason;
+    throw error;
+  }
+}
+
 describe("InMemoryIdentityLifecycleStore canAdminister active-state contract", () => {
   for (const [index, scenario] of administrationParityCases.entries()) {
     test(scenario.name, async () => {
@@ -196,6 +580,58 @@ describe("InMemoryIdentityLifecycleStore canAdminister active-state contract", (
           fixture.targetUserId,
         ),
       ).toBe(scenario.expected);
+    });
+  }
+});
+
+describe("InMemoryIdentityLifecycleStore suspendMembership relational parity", () => {
+  for (const [index, scenario] of membershipSuspensionParityCases.entries()) {
+    test(scenario.name, async () => {
+      const fixture = membershipSuspensionParityState(index, scenario);
+      const store = new InMemoryIdentityLifecycleStore(fixture.snapshot);
+      const outcome = await observeMembershipSuspension(store, fixture);
+      const targetStatus =
+        store.snapshot().memberships.find(
+          (membership) => membership.id === fixture.targetMembershipId,
+        )?.status ?? "missing";
+      expect({
+        outcome,
+        targetStatus,
+      }).toEqual({
+        outcome: scenario.expectedOutcome,
+        targetStatus: scenario.expectedMemoryTargetStatus,
+      });
+    });
+  }
+});
+
+test("InMemoryIdentityLifecycleStore ignores orphan target roles for user security mutation", async () => {
+  const store = new InMemoryIdentityLifecycleStore(orphanTargetRoleMutationState());
+  expect({
+    outcome: await observeUserSecurityMutation(store),
+    targetStatus: store.snapshot().users.find(
+      (user) => user.id === "usr_review_e_mutation_target",
+    )?.status,
+  }).toEqual({
+    outcome: "forbidden",
+    targetStatus: "active",
+  });
+});
+
+describe("InMemoryIdentityLifecycleStore recordIssuedAccessToken authority parity", () => {
+  for (const [index, scenario] of issuedTokenParityCases.entries()) {
+    test(scenario.name, async () => {
+      const fixture = issuedTokenParityState(index, scenario);
+      const store = new InMemoryIdentityLifecycleStore(fixture.snapshot);
+      expect({
+        outcome: await observeIssuedAccessTokenRecording(store, fixture.input),
+        recorded: store.snapshot().issuedAccessTokens.some(
+          (token) => token.jtiHash === fixture.input.jtiHash,
+        ),
+      }).toEqual({
+        outcome: scenario.expectedOutcome,
+        recorded: scenario.expectedOutcome === "recorded",
+      });
     });
   }
 });
@@ -1040,6 +1476,319 @@ describeLive("PgIdentityLifecycleStore live Postgres", () => {
     expect(unknownMedian).toBeGreaterThanOrEqual(225);
     expect(Math.abs(knownMedian - unknownMedian)).toBeLessThan(100);
   }, 15_000);
+
+  test("matches the in-memory suspendMembership relational parity corpus", async () => {
+    const store = new PgIdentityLifecycleStore(client);
+    await client.execute(
+      "DELETE FROM identity_memberships WHERE id LIKE 'mem_review_e_%'",
+    );
+    await client.execute(
+      "DELETE FROM identity_tenants WHERE id LIKE 'ten_review_e_%'",
+    );
+    await client.execute(
+      "DELETE FROM identity_users WHERE id LIKE 'usr_review_e_%'",
+    );
+    try {
+      for (const [index, scenario] of membershipSuspensionParityCases.entries()) {
+        const fixture = membershipSuspensionParityState(index, scenario);
+        for (const user of fixture.snapshot.users) {
+          await client.execute(
+            `INSERT INTO identity_users
+               (id, status, display_name, created_at, updated_at, disabled_at, deleted_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+              user.id,
+              user.status,
+              user.displayName,
+              user.createdAt,
+              user.updatedAt,
+              user.disabledAt ?? null,
+              user.deletedAt ?? null,
+            ],
+          );
+        }
+        for (const tenant of fixture.snapshot.tenants) {
+          await client.execute(
+            `INSERT INTO identity_tenants
+               (id, slug, name, allowed_scopes, created_at)
+             VALUES ($1, $2, $3, $4::jsonb, $5)`,
+            [
+              tenant.id,
+              tenant.slug,
+              tenant.name,
+              JSON.stringify(tenant.allowedScopes ?? []),
+              tenant.createdAt,
+            ],
+          );
+        }
+        const persistedUserIds = new Set(fixture.snapshot.users.map((user) => user.id));
+        const persistedTenantIds = new Set(fixture.snapshot.tenants.map((tenant) => tenant.id));
+        const persistedMembershipIds = new Set<string>();
+        for (const membership of fixture.snapshot.memberships.filter(
+          (candidate) =>
+            persistedUserIds.has(candidate.userId) &&
+            persistedTenantIds.has(candidate.tenantId),
+        )) {
+          await client.execute(
+            `INSERT INTO identity_memberships
+               (id, tenant_id, user_id, role, scopes, status, created_at)
+             VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+            [
+              membership.id,
+              membership.tenantId,
+              membership.userId,
+              membership.role,
+              JSON.stringify(membership.scopes),
+              membership.status ?? "active",
+              membership.createdAt,
+            ],
+          );
+          persistedMembershipIds.add(membership.id);
+        }
+
+        const outcome = await observeMembershipSuspension(store, fixture);
+        const target = await client.get<{ status: IdentityMembershipStatus }>(
+          "SELECT status FROM identity_memberships WHERE id = $1",
+          [fixture.targetMembershipId],
+        );
+        expect({
+          scenario: scenario.name,
+          outcome,
+          targetStatus: target?.status ?? "missing",
+        }).toEqual({
+          scenario: scenario.name,
+          outcome: scenario.expectedOutcome,
+          targetStatus: persistedMembershipIds.has(fixture.targetMembershipId)
+            ? scenario.expectedMemoryTargetStatus
+            : "missing",
+        });
+      }
+    } finally {
+      await client.execute(
+        "DELETE FROM identity_memberships WHERE id LIKE 'mem_review_e_%'",
+      );
+      await client.execute(
+        "DELETE FROM identity_tenants WHERE id LIKE 'ten_review_e_%'",
+      );
+      await client.execute(
+        "DELETE FROM identity_users WHERE id LIKE 'usr_review_e_%'",
+      );
+    }
+  });
+
+  test("ignores an unrepresentable orphan target role during user security mutation", async () => {
+    const store = new PgIdentityLifecycleStore(client);
+    await client.execute(
+      "DELETE FROM identity_memberships WHERE id LIKE 'mem_review_e_mutation_%'",
+    );
+    await client.execute(
+      "DELETE FROM identity_tenants WHERE id LIKE 'ten_review_e_mutation_%'",
+    );
+    await client.execute(
+      "DELETE FROM identity_users WHERE id LIKE 'usr_review_e_mutation_%'",
+    );
+    const snapshot = orphanTargetRoleMutationState();
+    try {
+      for (const user of snapshot.users) {
+        await client.execute(
+          `INSERT INTO identity_users
+             (id, status, display_name, created_at, updated_at, disabled_at, deleted_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            user.id,
+            user.status,
+            user.displayName,
+            user.createdAt,
+            user.updatedAt,
+            user.disabledAt ?? null,
+            user.deletedAt ?? null,
+          ],
+        );
+      }
+      for (const tenant of snapshot.tenants) {
+        await client.execute(
+          `INSERT INTO identity_tenants
+             (id, slug, name, allowed_scopes, created_at)
+           VALUES ($1, $2, $3, $4::jsonb, $5)`,
+          [
+            tenant.id,
+            tenant.slug,
+            tenant.name,
+            JSON.stringify(tenant.allowedScopes ?? []),
+            tenant.createdAt,
+          ],
+        );
+      }
+      await client.execute(
+        `INSERT INTO identity_memberships
+           (id, tenant_id, user_id, role, scopes, status, created_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+        [
+          snapshot.memberships[0]!.id,
+          snapshot.memberships[0]!.tenantId,
+          snapshot.memberships[0]!.userId,
+          snapshot.memberships[0]!.role,
+          JSON.stringify(snapshot.memberships[0]!.scopes),
+          snapshot.memberships[0]!.status ?? "active",
+          snapshot.memberships[0]!.createdAt,
+        ],
+      );
+
+      expect({
+        outcome: await observeUserSecurityMutation(store),
+        targetStatus: (
+          await client.one<{ status: IdentityUserStatus }>(
+            "SELECT status FROM identity_users WHERE id = 'usr_review_e_mutation_target'",
+          )
+        ).status,
+      }).toEqual({
+        outcome: "forbidden",
+        targetStatus: "active",
+      });
+    } finally {
+      await client.execute(
+        "DELETE FROM identity_memberships WHERE id LIKE 'mem_review_e_mutation_%'",
+      );
+      await client.execute(
+        "DELETE FROM identity_tenants WHERE id LIKE 'ten_review_e_mutation_%'",
+      );
+      await client.execute(
+        "DELETE FROM identity_users WHERE id LIKE 'usr_review_e_mutation_%'",
+      );
+    }
+  });
+
+  test("matches the in-memory recordIssuedAccessToken authority corpus", async () => {
+    const store = new PgIdentityLifecycleStore(client);
+    await client.execute(
+      "DELETE FROM identity_issued_access_tokens WHERE jti_hash LIKE 'jti_review_e_issued_%'",
+    );
+    await client.execute(
+      "DELETE FROM identity_session_families WHERE id LIKE 'fam_review_e_issued_%'",
+    );
+    await client.execute(
+      "DELETE FROM identity_memberships WHERE id LIKE 'mem_review_e_issued_%'",
+    );
+    await client.execute(
+      "DELETE FROM identity_tenants WHERE id LIKE 'ten_review_e_issued_%'",
+    );
+    await client.execute(
+      "DELETE FROM identity_users WHERE id LIKE 'usr_review_e_issued_%'",
+    );
+    try {
+      for (const [index, scenario] of issuedTokenParityCases.entries()) {
+        const fixture = issuedTokenParityState(index, scenario);
+        for (const user of fixture.snapshot.users) {
+          await client.execute(
+            `INSERT INTO identity_users
+               (id, status, display_name, created_at, updated_at, disabled_at, deleted_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+              user.id,
+              user.status,
+              user.displayName,
+              user.createdAt,
+              user.updatedAt,
+              user.disabledAt ?? null,
+              user.deletedAt ?? null,
+            ],
+          );
+        }
+        for (const tenant of fixture.snapshot.tenants) {
+          await client.execute(
+            `INSERT INTO identity_tenants
+               (id, slug, name, allowed_scopes, created_at)
+             VALUES ($1, $2, $3, $4::jsonb, $5)`,
+            [
+              tenant.id,
+              tenant.slug,
+              tenant.name,
+              JSON.stringify(tenant.allowedScopes ?? []),
+              tenant.createdAt,
+            ],
+          );
+        }
+        const persistedUserIds = new Set(fixture.snapshot.users.map((user) => user.id));
+        const persistedTenantIds = new Set(fixture.snapshot.tenants.map((tenant) => tenant.id));
+        for (const membership of fixture.snapshot.memberships.filter(
+          (candidate) =>
+            persistedUserIds.has(candidate.userId) &&
+            persistedTenantIds.has(candidate.tenantId),
+        )) {
+          await client.execute(
+            `INSERT INTO identity_memberships
+               (id, tenant_id, user_id, role, scopes, status, created_at)
+             VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+            [
+              membership.id,
+              membership.tenantId,
+              membership.userId,
+              membership.role,
+              JSON.stringify(membership.scopes),
+              membership.status ?? "active",
+              membership.createdAt,
+            ],
+          );
+        }
+        for (const family of fixture.snapshot.sessionFamilies.filter(
+          (candidate) =>
+            persistedUserIds.has(candidate.userId) &&
+            persistedTenantIds.has(candidate.tenantId),
+        )) {
+          await client.execute(
+            `INSERT INTO identity_session_families
+               (id, session_hash, user_id, tenant_id, scopes, status,
+                expires_at, created_at, updated_at, revoked_at, revoke_reason)
+             VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)`,
+            [
+              family.id,
+              `session_${family.id}`,
+              family.userId,
+              family.tenantId,
+              JSON.stringify(family.scopes),
+              family.status,
+              family.expiresAt,
+              family.createdAt,
+              family.updatedAt,
+              family.revokedAt ?? null,
+              family.revokeReason ?? null,
+            ],
+          );
+        }
+
+        expect({
+          scenario: scenario.name,
+          outcome: await observeIssuedAccessTokenRecording(store, fixture.input),
+          recorded: (
+            await client.get<{ jti_hash: string }>(
+              "SELECT jti_hash FROM identity_issued_access_tokens WHERE jti_hash = $1",
+              [fixture.input.jtiHash],
+            )
+          ) !== null,
+        }).toEqual({
+          scenario: scenario.name,
+          outcome: scenario.expectedOutcome,
+          recorded: scenario.expectedOutcome === "recorded",
+        });
+      }
+    } finally {
+      await client.execute(
+        "DELETE FROM identity_issued_access_tokens WHERE jti_hash LIKE 'jti_review_e_issued_%'",
+      );
+      await client.execute(
+        "DELETE FROM identity_session_families WHERE id LIKE 'fam_review_e_issued_%'",
+      );
+      await client.execute(
+        "DELETE FROM identity_memberships WHERE id LIKE 'mem_review_e_issued_%'",
+      );
+      await client.execute(
+        "DELETE FROM identity_tenants WHERE id LIKE 'ten_review_e_issued_%'",
+      );
+      await client.execute(
+        "DELETE FROM identity_users WHERE id LIKE 'usr_review_e_issued_%'",
+      );
+    }
+  });
 
   test("matches the in-memory canAdminister active-state corpus", async () => {
     const store = new PgIdentityLifecycleStore(client);

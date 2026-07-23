@@ -967,7 +967,28 @@ export class InMemoryIdentityLifecycleStore implements IdentityLifecycleStore {
           candidate.tenantId === input.tenantId &&
           candidate.status === "active",
       );
-      if (family === undefined) throw lifecycleError("invalid_credentials");
+      const user = this.state.users.find(
+        (candidate) =>
+          candidate.id === input.userId &&
+          candidate.status === "active",
+      );
+      const tenant = this.state.tenants.find(
+        (candidate) => candidate.id === input.tenantId,
+      );
+      const membership = this.state.memberships.find(
+        (candidate) =>
+          candidate.userId === input.userId &&
+          candidate.tenantId === input.tenantId &&
+          membershipStatus(candidate) === "active",
+      );
+      if (
+        family === undefined ||
+        user === undefined ||
+        tenant === undefined ||
+        membership === undefined
+      ) {
+        throw lifecycleError("invalid_credentials");
+      }
       if (!this.state.issuedAccessTokens.some((candidate) => candidate.jtiHash === input.jtiHash)) {
         this.state.issuedAccessTokens.push(structuredClone(input));
       }
@@ -997,8 +1018,13 @@ export class InMemoryIdentityLifecycleStore implements IdentityLifecycleStore {
       const actorTenant = this.state.tenants.find((tenant) => tenant.id === input.actorTenantId);
       const target = this.state.users.find((candidate) => candidate.id === input.targetUserId);
       if (target === undefined) return null;
+      const tenantIds = new Set(this.state.tenants.map((tenant) => tenant.id));
       const targetRoles = this.state.memberships
-        .filter((membership) => membership.userId === input.targetUserId)
+        .filter(
+          (membership) =>
+            membership.userId === input.targetUserId &&
+            tenantIds.has(membership.tenantId),
+        )
         .map((membership) => membership.role);
       const highestTargetRole = highestRole(targetRoles);
       if (
@@ -1040,16 +1066,22 @@ export class InMemoryIdentityLifecycleStore implements IdentityLifecycleStore {
       const actorUser = this.state.users.find(
         (candidate) => candidate.id === input.actorUserId && candidate.status === "active",
       );
+      const tenant = this.state.tenants.find(
+        (candidate) => candidate.id === input.tenantId,
+      );
       const actor = this.state.memberships.find(
         (candidate) =>
           candidate.userId === input.actorUserId &&
           candidate.tenantId === input.tenantId &&
           membershipStatus(candidate) === "active",
       );
+      const targetUser = this.state.users.find(
+        (candidate) => candidate.id === input.targetUserId,
+      );
       const target = this.state.memberships.find(
         (candidate) => candidate.userId === input.targetUserId && candidate.tenantId === input.tenantId,
       );
-      if (target === undefined) return null;
+      if (tenant === undefined || targetUser === undefined || target === undefined) return null;
       if (
         actorUser === undefined ||
         actor === undefined ||
