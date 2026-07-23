@@ -152,6 +152,34 @@ export type {
   IdentitySourceMappingV1,
   PlanCanonicalIdentityMigrationInputV1,
 } from "./identity-contract.js";
+export {
+  IDENTITY_ACCESS_TOKEN_TYPE,
+  IDENTITY_JWKS_SCHEMA_VERSION,
+  IDENTITY_PUBLIC_KEY_ALGORITHMS,
+  IdentityAccessTokenVerifier,
+  IdentityAuthError,
+  IdentityJwksRegistry,
+  InMemoryHashedTokenStateStore,
+  StaticHashedTokenStateStore,
+  hashOpaqueClaim,
+  issueIdentityAccessToken,
+  type IdentityAccessTokenClaims,
+  type IdentityAccessTokenVerifierOptions,
+  type IdentityJwksDocument,
+  type IdentityJwksKeyInput,
+  type IdentityJwksKeyStatus,
+  type IdentityPublicKeyAlgorithm,
+  type IdentityPublishedJwk,
+  type IdentitySessionFamilyStatus,
+  type IdentityTokenStateStore,
+  type IdentityTokenVerificationRequirements,
+  type IssueIdentityAccessTokenOptions,
+} from "./identity-auth.js";
+export {
+  createIdentityAuthApi,
+  type IdentityAuthApi,
+  type IdentityAuthApiOptions,
+} from "./identity-auth-api.js";
 export { listEveDocumentKeys, writeEveAgent } from "./eve.js";
 export { applyContactPointSyncResults, syncIdentityContactPoints, syncIdentityContactPointsAndUpdate } from "./integrations.js";
 export {

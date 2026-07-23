@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { IdentityStore } from "./storage.js";
@@ -50,6 +51,14 @@ import {
   type VoiceGenerationMode,
 } from "./media.js";
 import { seedHasnaCompanyAgents } from "./roster.js";
+import {
+  IdentityAccessTokenVerifier,
+  IdentityJwksRegistry,
+  StaticHashedTokenStateStore,
+  type IdentityJwksDocument,
+  type IdentityPublicKeyAlgorithm,
+  type IdentitySessionFamilyStatus,
+} from "./identity-auth.js";
 
 interface ParsedArgs {
   positionals: string[];
@@ -111,6 +120,8 @@ Commands:
   agent manifest <id|identifier>
   agent register --name <name> [--identifier agent:name]
   agent seed-company [--docs-dir dir] [--keep-deprecated]
+  auth jwks --jwks-file <public-jwks.json>
+  auth verify --token-file <owner-only-file> --jwks-file <public-jwks.json> --token-state-file <hashed-state.json> --issuer <issuer> --audience <audience> --algorithm <alg> [--tenant <tenant>] [--scope <scope>...]
   eve export <id|identifier> --out <dir>
   media doctor
   media status [id|identifier]
@@ -266,6 +277,11 @@ async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean)
     return;
   }
 
+  if (command === "auth") {
+    await dispatchAuth(rest, parsed, json);
+    return;
+  }
+
   if (command === "eve") {
     await dispatchEve(rest, parsed, store, json);
     return;
@@ -337,6 +353,74 @@ async function dispatch(parsed: ParsedArgs, store: IdentityStore, json: boolean)
   }
 
   throw new Error(`Unknown command: ${command}`);
+}
+
+async function dispatchAuth(rest: string[], parsed: ParsedArgs, json: boolean): Promise<void> {
+  const subcommand = required(rest[0], "auth requires jwks or verify");
+  const jwksPath = required(flagValue(parsed, "jwks-file"), "auth requires --jwks-file");
+  const document = JSON.parse(await readFile(jwksPath, "utf8")) as IdentityJwksDocument;
+  const jwks = IdentityJwksRegistry.fromDocument(document);
+
+  if (subcommand === "jwks") {
+    output(jwks.publicDocument(), true);
+    return;
+  }
+  if (subcommand !== "verify") throw new Error(`Unknown auth command: ${subcommand}`);
+
+  const tokenPath = required(flagValue(parsed, "token-file"), "auth verify requires --token-file");
+  const token = await readOwnerOnlyTokenFile(tokenPath);
+  const statePath = required(
+    flagValue(parsed, "token-state-file"),
+    "auth verify requires --token-state-file",
+  );
+  const stateInput = JSON.parse(await readFile(statePath, "utf8")) as {
+    revoked_jti_sha256?: string[];
+    session_family_status_by_sha256: Record<string, IdentitySessionFamilyStatus>;
+  };
+  const verifier = new IdentityAccessTokenVerifier({
+    issuer: required(flagValue(parsed, "issuer"), "auth verify requires --issuer"),
+    audience: flagValues(parsed, "audience"),
+    algorithms: flagValues(parsed, "algorithm") as IdentityPublicKeyAlgorithm[],
+    jwks,
+    tokenState: new StaticHashedTokenStateStore(stateInput),
+  });
+  const claims = await verifier.verify(token, {
+    ...(flagValue(parsed, "tenant") === undefined ? {} : { tenant: flagValue(parsed, "tenant") }),
+    scopes: flagValues(parsed, "scope"),
+  });
+  if (json || hasFlag(parsed, "verbose")) {
+    output({ active: true, claims }, true);
+    return;
+  }
+  console.log(`Verified access token for ${claims.sub}.`);
+  printTable(["field", "value"], [
+    ["issuer", claims.iss],
+    ["audience", Array.isArray(claims.aud) ? claims.aud.join(",") : claims.aud],
+    ["tenant", claims.tenant],
+    ["session", claims.session],
+    ["scopes", claims.scopes.join(",")],
+    ["expires", new Date(claims.exp * 1000).toISOString()],
+  ]);
+}
+
+async function readOwnerOnlyTokenFile(path: string): Promise<string> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const fileStat = await handle.stat();
+    const effectiveUid = typeof process.geteuid === "function" ? process.geteuid() : undefined;
+    if (
+      !fileStat.isFile() ||
+      (fileStat.mode & 0o077) !== 0 ||
+      (effectiveUid !== undefined && fileStat.uid !== effectiveUid) ||
+      fileStat.size < 32 ||
+      fileStat.size > 16_384
+    ) {
+      throw new Error("auth token file must be an owner-owned, owner-only regular file");
+    }
+    return (await handle.readFile("utf8")).trim();
+  } finally {
+    await handle.close();
+  }
 }
 
 function createStoreFromArgs(parsed: ParsedArgs): IdentityStore {

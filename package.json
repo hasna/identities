@@ -133,6 +133,7 @@
   "dependencies": {
     "@hasna/contracts": "0.4.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "jose": "6.2.3",
     "pg": "^8.16.3",
     "zod": "^3.24.2"
   }
