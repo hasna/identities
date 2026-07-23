@@ -13,7 +13,7 @@ import type {
 
 export const globalAgentInstructionSourceSet = {
   id: "hasna-global-agent-rules-standard",
-  version: "2026-07-10",
+  version: "2026-07-23",
   title: "Hasna Global Coding Agent Rules Standard",
 } as const;
 
@@ -22,6 +22,8 @@ export const agentOperatingRulesVersion = "1.1.5" as const;
 export const agentOperatingRulesSentinel = "<!-- hasna:agent-operating-rules v=1.1.5 -->" as const;
 
 export const noBrittleHardcodingRule = "Do not hardcode brittle values, paths, provider names, config, business logic, environment-specific IDs, or one-off mappings when a source-of-truth, schema/config-driven, package-owned, reusable, or cleaner abstraction exists. This is especially strict in medium and large applications. Explicit constants, fixtures, tests, and temporary compatibility shims are allowed only when scoped, named, and justified." as const;
+
+const coordinatorConcurrencyRule = "While delegated or background workers run, coordinators advance every safe, ready, non-overlapping task and do not idle-watch or repeatedly poll workers. They check workers only when completion is signaled, the result becomes a dependency, or bounded intervention is needed. Preserve worker ownership and do not duplicate its assigned scope. If all remaining work is genuinely dependency-blocked, yield and resume on completion rather than manufacture work." as const;
 
 export const globalAgentInstructionProviders = ["generic", "antigravity", "codewith", "claude", "codex", "opencode"] as const;
 
@@ -40,7 +42,7 @@ const sourceSetMetadata = {
 const provenance = {
   source: "open-identities:global-agent-rules",
   createdAt: "2026-07-01T00:00:00.000Z",
-  updatedAt: "2026-07-10T00:00:00.000Z",
+  updatedAt: "2026-07-23T00:00:00.000Z",
 } as const;
 
 const operatingRulesProvenance = {
@@ -155,6 +157,12 @@ export const globalAgentInstructionSourceInputs: InstructionSourceInput[] = [
       "",
       "Coordinator sessions route implementation through subagents and task workflows. A coordinator may inspect, plan, review, and record evidence, but it must not write product code directly unless the task explicitly assigns implementation to that session.",
       "",
+      coordinatorConcurrencyRule,
+      "",
+      "For materially multi-step work, the owning coordinator creates or reuses one runtime-native root and links it to the one authoritative Todos root. Recovery reuses both stable identifiers.",
+      "",
+      "Delegated workers inherit explicit scope and lineage only. They do not create competing root plans or duplicate Todos tasks unless explicitly assigned orchestration ownership.",
+      "",
       "Act autonomously: when a dispatch, package, CLI, or automation path fails, diagnose and repair the owning package or workflow before asking the user. Ask only when blocked by destructive actions, secret-bearing choices, or genuinely user-only decisions. Do not fall back to tmux prompt paste unless a human explicitly authorizes that emergency path.",
       "",
       "Apply a minimum adversarial verification policy: non-trivial code, config, release, or operational changes require an independent adversarial review or a clearly labeled adversarial self-review when no reviewer can be spawned. Reconcile findings before marking work complete.",
@@ -194,7 +202,7 @@ export const globalAgentInstructionSourceInputs: InstructionSourceInput[] = [
       "7. Never push directly to main, default, or protected branches unless the user explicitly instructs that exact repo and exact operation.",
       `8. ${noBrittleHardcodingRule}`,
       "9. Act autonomously: diagnose and repair owning CLIs, packages, and workflows before asking the user; ask only for destructive, secret-bearing, or user-only decisions.",
-      "10. Coordinator sessions do not write product code directly. They delegate implementation through subagents or task workflows and then inspect, review, and coordinate the result.",
+      `10. Coordinator sessions do not write product code directly. They delegate implementation through subagents or task workflows and then inspect, review, and coordinate the result. ${coordinatorConcurrencyRule}`,
       "11. Codewith native loops are Codewith-native scheduled or recurring sessions, including /loop and built-in loop tools. OpenLoops is a separate orchestration package and daemon. Use the correct term and mechanism.",
       "12. Dispatch failure requires self-healing. Do not use tmux prompt paste as a fallback unless explicitly authorized. Fix the owning package or route, publish or prepare the update, update affected machines, and record evidence.",
       "13. Minimum adversarial verification is required for non-trivial changes. Use a fresh adversarial reviewer when available; otherwise perform and label an adversarial self-review, then reconcile findings.",
@@ -355,7 +363,7 @@ export const globalAgentInstructionSourceInputs: InstructionSourceInput[] = [
     content: lines([
       "# Codewith Provider Overlay",
       "",
-      "Use native Codewith goal plans for substantial multi-phase work and native Codewith goals for coherent single-slice work. Keep short-horizon checklists aligned with the active native goal.",
+      "For materially multi-step owner work, create or reuse exactly one native Codewith goal plan and link it to the one authoritative Todos root; simple one-step answers and lookups are exempt. Coherent single-slice work may use one native goal. Recovery reuses the stable goal-plan and Todos identifiers.",
       "When creating or updating a native Codewith goal plan, add explicit adversarial verification goal nodes or steps during the plan and a final adversarial verification step before marking the plan complete.",
       "",
       "Use Codewith native /loop and built-in schedule or loop tools when the user asks for Codewith recurring work. OpenLoops is a separate package; do not call native Codewith loops OpenLoops.",

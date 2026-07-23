@@ -977,6 +977,51 @@ describe("open-identities", () => {
     expect(configsExport.sources[3]).toMatchObject({ layer: "tool", merge: "append", order: 200 });
   });
 
+  test("Codewith export links materially multi-step work to stable native and Todos roots", () => {
+    const policy = createGlobalAgentInstructionSourceExport({ providers: ["codewith"] })
+      .sources
+      .map((source) => source.content ?? "")
+      .join("\n");
+
+    expect(policy).toContain("the owning coordinator creates or reuses one runtime-native root and links it to the one authoritative Todos root");
+    expect(policy).toContain("Recovery reuses both stable identifiers");
+    expect(policy).toContain("Delegated workers inherit explicit scope and lineage only");
+    expect(policy).toContain("They do not create competing root plans or duplicate Todos tasks unless explicitly assigned orchestration ownership");
+  });
+
+  test("exports coordinator non-idling semantics in canonical and non-overridable policy", () => {
+    const exported = createGlobalAgentInstructionSourceExport({ providers: ["codewith"] });
+    const canonical = exported.sources.find((source) => source.id === "hasna-global-coding-agent-system-prompt");
+    const nonOverridable = exported.sources.find((source) => source.id === "hasna-global-coding-agent-non-overridable-rules");
+
+    for (const source of [canonical, nonOverridable]) {
+      expect(source?.content).toContain("coordinators advance every safe, ready, non-overlapping task");
+      expect(source?.content).toContain("do not idle-watch or repeatedly poll workers");
+      expect(source?.content).toContain("They check workers only when completion is signaled, the result becomes a dependency, or bounded intervention is needed");
+      expect(source?.content).toContain("Preserve worker ownership and do not duplicate its assigned scope");
+      expect(source?.content).toContain("If all remaining work is genuinely dependency-blocked, yield and resume on completion rather than manufacture work");
+    }
+    expect(nonOverridable?.content).toContain("10. Coordinator sessions do not write product code directly");
+  });
+
+  test("Codewith overlay creates or reuses one native plan while preserving existing behavior", () => {
+    const codewithSources = listGlobalAgentInstructionSources({ providers: ["codewith"] });
+    const overlay = codewithSources.find((source) => source.id === "hasna-codewith-global-agent-overlay");
+
+    expect(overlay?.content).toContain("create or reuse exactly one native Codewith goal plan");
+    expect(overlay?.content).toContain("simple one-step answers and lookups are exempt");
+    expect(overlay?.content).toContain("Coherent single-slice work may use one native goal");
+    expect(overlay?.content).toContain("Recovery reuses the stable goal-plan and Todos identifiers");
+    expect(overlay?.content).toContain("add explicit adversarial verification goal nodes or steps");
+    expect(overlay?.content).toContain("Codewith native /loop");
+    expect(overlay?.ruleIds).toEqual([
+      "provider:codewith:native-goals",
+      "provider:codewith:goal-plan-adversarial-steps",
+      "provider:codewith:native-loops",
+      "provider:codewith:no-tmux-fallback",
+    ]);
+  });
+
   test("CLI exposes instruction source list, paths, show, set, validate, export, import, and sources", async () => {
     const dir = await mkdtemp(join(tmpdir(), "open-identities-instructions-cli-"));
     const storePath = join(dir, "identities.json");
