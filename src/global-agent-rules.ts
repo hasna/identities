@@ -159,7 +159,7 @@ export const globalAgentInstructionSourceInputs: InstructionSourceInput[] = [
       "",
       coordinatorConcurrencyRule,
       "",
-      "For materially multi-step work, the owning coordinator creates or reuses one runtime-native root and links it to the one authoritative Todos root. Recovery reuses both stable identifiers.",
+      "For materially multi-step work, the owning coordinator creates or reuses one durable execution root supported by the active runtime and links it to the one authoritative Todos root. A runtime without such a native primitive must not invent one; Todos remains authoritative. Recovery reuses stable identifiers.",
       "",
       "Delegated workers inherit explicit scope and lineage only. They do not create competing root plans or duplicate Todos tasks unless explicitly assigned orchestration ownership.",
       "",
