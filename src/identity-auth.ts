@@ -266,6 +266,10 @@ export class IdentityAccessTokenVerifier {
     }
   }
 
+  isBoundToJwksRegistry(registry: IdentityJwksRegistry): boolean {
+    return this.jwks === registry;
+  }
+
   async verify(
     token: string,
     requirements: IdentityTokenVerificationRequirements = {},

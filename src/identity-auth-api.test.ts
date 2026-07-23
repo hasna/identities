@@ -58,6 +58,53 @@ async function fixture() {
 }
 
 describe("identity auth API library", () => {
+  test("rejects a stale verifier bound to a different JWKS registry", async () => {
+    const issuer = "https://identity.example.test";
+    const staleRegistry = new IdentityJwksRegistry({
+      issuer,
+      revision: 1,
+      keys: [{ kid: "old", alg: "EdDSA", status: "active", publicJwk }],
+    });
+    const publishedRegistry = new IdentityJwksRegistry({
+      issuer,
+      revision: 2,
+      keys: [{ kid: "current", alg: "EdDSA", status: "active", publicJwk }],
+      revokedKids: ["old"],
+    });
+    const state = new InMemoryHashedTokenStateStore();
+    state.registerSessionFamily("session-1");
+    const staleVerifier = new IdentityAccessTokenVerifier({
+      issuer,
+      audience: "infinity",
+      algorithms: ["EdDSA"],
+      jwks: staleRegistry,
+      tokenState: state,
+    });
+    const now = Math.floor(Date.now() / 1000);
+    const staleToken = await issueIdentityAccessToken({
+      privateKey,
+      kid: "old",
+      alg: "EdDSA",
+      issuer,
+      audience: "infinity",
+      subject: "identity:user-1",
+      tenant: "tenant-1",
+      session: "session-1",
+      scopes: ["runs:read"],
+      jti: "stale-token",
+      issuedAt: now - 1,
+      notBefore: now - 1,
+      expiresAt: now + 300,
+    });
+
+    expect(publishedRegistry.publicDocument().revoked_kids).toEqual(["old"]);
+    expect((await staleVerifier.verify(staleToken)).sub).toBe("identity:user-1");
+    expect(() => createIdentityAuthApi({
+      jwks: publishedRegistry,
+      verifier: staleVerifier,
+    })).toThrow(/same JWKS registry/);
+  });
+
   test("publishes a cacheable public JWKS document", async () => {
     const { api } = await fixture();
     const response = await api.handle(new Request("http://local/.well-known/jwks.json"));

@@ -16,6 +16,13 @@ export interface IdentityAuthApi {
 }
 
 export function createIdentityAuthApi(options: IdentityAuthApiOptions): IdentityAuthApi {
+  if (!options.verifier.isBoundToJwksRegistry(options.jwks)) {
+    throw new IdentityAuthError(
+      "invalid_configuration",
+      "identity auth API publication and verification must use the same JWKS registry",
+      500,
+    );
+  }
   const requirements = {
     ...(options.requirements?.tenant === undefined ? {} : { tenant: options.requirements.tenant }),
     ...(options.requirements?.scopes === undefined ? {} : { scopes: [...options.requirements.scopes] }),

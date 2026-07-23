@@ -324,13 +324,10 @@ describe("identity access token contract", () => {
     await writeFile(tokenPath, "not-a-real-token-but-long-enough-to-reach-permission-check", { mode: 0o644 });
     await chmod(tokenPath, 0o644);
     await writeFile(jwksPath, JSON.stringify(registry().publicDocument()));
-    const output: string[] = [];
-    const log = spyOn(console, "log").mockImplementation((value?: unknown) => {
-      output.push(String(value));
-    });
-    const originalExitCode = process.exitCode;
     try {
-      await runCli([
+      const child = Bun.spawn([
+        process.execPath,
+        join(import.meta.dir, "cli.ts"),
         "auth",
         "verify",
         "--json",
@@ -340,12 +337,20 @@ describe("identity access token contract", () => {
         tokenPath,
         "--jwks-file",
         jwksPath,
+      ], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
       ]);
+      expect(exitCode).toBe(1);
+      expect(stderr).toBe("");
+      expect(stdout).toContain("owner-owned, owner-only regular file");
     } finally {
-      process.exitCode = originalExitCode;
-      log.mockRestore();
       await rm(directory, { recursive: true, force: true });
     }
-    expect(output.join("\n")).toContain("owner-owned, owner-only regular file");
   });
 });
