@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,12 +11,14 @@ import {
 } from "./identity-auth.js";
 import {
   Argon2idIdentityPasswordHasher,
+  DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE,
   IdentityLifecycleError,
   IdentityLifecycleService,
   InMemoryIdentityLifecycleStore,
   createIdentityLifecycleApi,
   identityLifecycleMigrations,
   normalizeLoginIdentifier,
+  type IdentityInviteRecord,
   type IdentityPasswordHasher,
   type RegistrationPolicy,
 } from "./user-lifecycle.js";
@@ -201,6 +204,8 @@ describe("registration and first-admin bootstrap", () => {
     expect(snapshot.tenants).toHaveLength(1);
     expect(snapshot.memberships).toHaveLength(1);
     expect(snapshot.memberships[0]?.role).toBe("owner");
+    expect(snapshot.sessionFamilies).toHaveLength(1);
+    expect(snapshot.refreshTokens).toHaveLength(1);
   });
 
   test("rejects duplicate and concurrent signup without partial rows", async () => {
@@ -219,6 +224,8 @@ describe("registration and first-admin bootstrap", () => {
     expect(store.snapshot().users).toHaveLength(1);
     expect(store.snapshot().loginIdentifiers).toHaveLength(1);
     expect(store.snapshot().credentials).toHaveLength(1);
+    expect(store.snapshot().sessionFamilies).toHaveLength(1);
+    expect(store.snapshot().refreshTokens).toHaveLength(1);
   });
 
   test("enforces disabled, invite, expired-invite, and used-invite policies", async () => {
@@ -908,7 +915,10 @@ describe("review-A lifecycle security regressions", () => {
       }],
     });
     expect(
-      await staleStore.reserveAuthAttempt("a".repeat(64), new Date("2026-01-01T00:06:00.000Z"), {
+      await staleStore.reserveAuthAttempt({
+        failureKeyHash: "a".repeat(64),
+        admissionKeyHash: "b".repeat(64),
+      }, new Date("2026-01-01T00:06:00.000Z"), {
         maxFailures: 3,
         windowSeconds: 300,
         lockSeconds: 300,
@@ -996,6 +1006,88 @@ describe("review-A lifecycle security regressions", () => {
     const lifecycleModule = await import("./user-lifecycle.js");
     expect(typeof (lifecycleModule as Record<string, unknown>)["auditLoginIdentifierCanonicalization"]).toBe(
       "function",
+    );
+  });
+});
+
+describe("review-B lifecycle security regressions", () => {
+  test("persists only the authoritative invite management scope and rechecks creator scope", async () => {
+    const { service, store } = fixture("invite");
+    const owner = await firstAdmin(service);
+    const token = "review-b-authoritative-invite-token";
+    const now = new Date();
+
+    const forgedInvite: IdentityInviteRecord = {
+      id: "inv_review_b_authoritative_scope",
+      tenantId: owner.tenant.id,
+      tokenHash: createHash("sha256").update(token).digest("hex"),
+      identifierKind: "email",
+      normalizedIdentifier: "review-b-scope@example.test",
+      managementScope: "runs:read",
+      role: "member",
+      scopes: ["runs:read"],
+      expiresAt: new Date(now.getTime() + 300_000).toISOString(),
+      createdByUserId: owner.user.id,
+      createdAt: now.toISOString(),
+    };
+    await store.createInvite(forgedInvite, {
+      actorTokenScopes: owner.scopes,
+      inviteManagementScope: DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE,
+    });
+
+    expect(
+      store.snapshot().invites.find((invite) => invite.id === "inv_review_b_authoritative_scope")
+        ?.managementScope,
+    ).toBe(DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE);
+
+    const mutable = store as unknown as {
+      state: { memberships: Array<{ userId: string; tenantId: string; scopes: string[] }> };
+    };
+    const creatorMembership = mutable.state.memberships.find(
+      (membership) => membership.userId === owner.user.id && membership.tenantId === owner.tenant.id,
+    )!;
+    creatorMembership.scopes = creatorMembership.scopes.filter(
+      (scope) => scope !== DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE,
+    );
+
+    expect(await errorReason(service.signup({
+      identifier: { kind: "email", value: "review-b-scope@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "Review B Scope",
+      inviteToken: token,
+    }))).toBe("invite_invalid");
+    expect(store.snapshot().users).toHaveLength(1);
+    expect(
+      store.snapshot().invites.find((invite) => invite.id === "inv_review_b_authoritative_scope")
+        ?.consumedAt,
+    ).toBeUndefined();
+  });
+
+  test("bounds one client's Argon2 work across distinct unknown identifiers", async () => {
+    const hasher = new GatedPasswordHasher();
+    const { service, store } = fixture("open", { hasher });
+    await firstAdmin(service);
+    hasher.verifyCalls = 0;
+
+    const attempts = Array.from({ length: 8 }, (_, index) =>
+      service.login({
+        identifier: { kind: "email", value: `unknown-${index}@example.test` },
+        password: "wrong",
+        throttleKey: "one-fanout-client",
+      }).catch((error) => error),
+    );
+    for (let turn = 0; turn < 50 && hasher.active < 2; turn += 1) await Promise.resolve();
+    hasher.release();
+    const results = await Promise.all(attempts);
+
+    expect(hasher.maxActive).toBeLessThanOrEqual(2);
+    expect(
+      results.filter(
+        (result) => result instanceof IdentityLifecycleError && result.reason === "rate_limited",
+      ),
+    ).toHaveLength(6);
+    expect(store.snapshot().loginThrottles.every((throttle) => (throttle.inFlight ?? 0) === 0)).toBe(
+      true,
     );
   });
 });

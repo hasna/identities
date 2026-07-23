@@ -19,7 +19,8 @@ import {
   auditLoginIdentifierCanonicalization,
   normalizeLoginIdentifier,
   type CreateSessionMutation,
-  type IdentityInviteRecord,
+  type IdentityAuthAttemptKeys,
+  type IdentityInviteCreation,
   type IdentityJtiRevocationRecord,
   type IdentityLifecycleStore,
   type IdentityLoginThrottleRecord,
@@ -327,7 +328,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
             throw lifecycleFailure("invite_invalid", "invite is invalid or expired", 400);
           }
           const invitedTenant = await tx.get<TenantRow>(
-            `SELECT * FROM ${IDENTITY_TENANTS_TABLE} WHERE id = $1`,
+            `SELECT * FROM ${IDENTITY_TENANTS_TABLE} WHERE id = $1 FOR UPDATE`,
             [invite.tenant_id],
           );
           if (invitedTenant === null) {
@@ -384,6 +385,19 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
             status: "active",
           };
         }
+
+        const initialSession = structuredClone(input.initialSession);
+        initialSession.family.userId = input.user.id;
+        initialSession.family.tenantId = tenant.id;
+        initialSession.family.scopes = intersectScopeSets(
+          initialSession.family.scopes,
+          membership.scopes,
+          tenant.allowedScopes ?? membership.scopes,
+        );
+        if (initialSession.family.scopes.length === 0) {
+          throw lifecycleFailure("invalid_scope", "requested scope is not allowed", 403);
+        }
+        initialSession.refresh.familyId = initialSession.family.id;
 
         await tx.execute(
           `INSERT INTO ${IDENTITY_USERS_TABLE}
@@ -444,6 +458,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
           ],
         );
         await insertOneTimeToken(tx, input.verification);
+        await insertSessionMutation(tx, initialSession);
         if (invite !== null) {
           await tx.execute(
             `UPDATE ${IDENTITY_INVITES_TABLE}
@@ -452,7 +467,13 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
             [invite.id, input.user.createdAt, input.user.id],
           );
         }
-        return { user: input.user, tenant, membership, identifier: input.identifier };
+        return {
+          user: input.user,
+          tenant,
+          membership,
+          identifier: input.identifier,
+          initialSession,
+        };
       });
     } catch (error) {
       if (error instanceof IdentityLifecycleError) throw error;
@@ -546,69 +567,129 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
   }
 
   async reserveAuthAttempt(
-    keyHash: string,
+    keys: IdentityAuthAttemptKeys,
     now: Date,
     policy: IdentityThrottlePolicy,
   ): Promise<boolean> {
+    if (keys.failureKeyHash === keys.admissionKeyHash) {
+      throw lifecycleFailure("invalid_configuration", "auth admission keys must be distinct", 500);
+    }
+    const orderedKeys = [keys.failureKeyHash, keys.admissionKeyHash].sort();
     return this.client.transaction(async (tx) => {
-      await tx.execute(
-        `INSERT INTO ${IDENTITY_LOGIN_THROTTLE_TABLE}
-           (key_hash, failures, window_started_at, locked_until, tokens, last_refilled_at, in_flight, updated_at)
-         VALUES ($1, 0, $2, NULL, $3, $2, 0, $2)
-         ON CONFLICT (key_hash) DO NOTHING`,
-        [keyHash, now.toISOString(), policy.maxFailures],
+      for (const keyHash of orderedKeys) {
+        await tx.execute(
+          `INSERT INTO ${IDENTITY_LOGIN_THROTTLE_TABLE}
+             (key_hash, failures, window_started_at, locked_until, tokens, last_refilled_at, in_flight, updated_at)
+           VALUES ($1, 0, $2, NULL, $3, $2, 0, $2)
+           ON CONFLICT (key_hash) DO NOTHING`,
+          [keyHash, now.toISOString(), policy.maxFailures],
+        );
+      }
+      const buckets = new Map<string, ThrottleRow>();
+      for (const keyHash of orderedKeys) {
+        const row = await tx.one<ThrottleRow>(
+          `SELECT * FROM ${IDENTITY_LOGIN_THROTTLE_TABLE}
+           WHERE key_hash = $1
+           FOR UPDATE`,
+          [keyHash],
+        );
+        buckets.set(keyHash, row);
+      }
+      const failureBucket = buckets.get(keys.failureKeyHash)!;
+      const admissionBucket = buckets.get(keys.admissionKeyHash)!;
+      if (
+        failureBucket.locked_until !== null &&
+        new Date(failureBucket.locked_until) > now
+      ) {
+        return false;
+      }
+      const lastRefilledAt = new Date(
+        failureBucket.last_refilled_at ?? failureBucket.window_started_at,
       );
-      const row = await tx.one<ThrottleRow>(
-        `SELECT * FROM ${IDENTITY_LOGIN_THROTTLE_TABLE}
-         WHERE key_hash = $1
-         FOR UPDATE`,
-        [keyHash],
-      );
-      if (row.locked_until !== null && new Date(row.locked_until) > now) return false;
-      const lastRefilledAt = new Date(row.last_refilled_at ?? row.window_started_at);
       const elapsedSeconds = Math.max(0, (now.getTime() - lastRefilledAt.getTime()) / 1_000);
       const refillRate = policy.maxFailures / policy.windowSeconds;
       const tokens = Math.min(
         policy.maxFailures,
-        (row.tokens === null ? policy.maxFailures : Number(row.tokens)) + elapsedSeconds * refillRate,
+        (failureBucket.tokens === null ? policy.maxFailures : Number(failureBucket.tokens)) +
+          elapsedSeconds * refillRate,
       );
-      const reservationIsStale =
-        row.updated_at !== null &&
-        new Date(row.updated_at).getTime() <= now.getTime() - policy.windowSeconds * 1_000;
-      const inFlight = reservationIsStale ? 0 : Number(row.in_flight);
-      if (inFlight >= policy.maxConcurrent || tokens < 1) return false;
-      await tx.execute(
-        `UPDATE ${IDENTITY_LOGIN_THROTTLE_TABLE}
-         SET tokens = $2,
-             last_refilled_at = $3,
-             in_flight = $4,
-             updated_at = $3
-         WHERE key_hash = $1`,
-        [keyHash, tokens - 1, now.toISOString(), inFlight + 1],
-      );
+      const currentInFlight = (bucket: ThrottleRow): number => {
+        const reservationIsStale =
+          bucket.updated_at !== null &&
+          new Date(bucket.updated_at).getTime() <=
+            now.getTime() - policy.windowSeconds * 1_000;
+        return reservationIsStale ? 0 : Number(bucket.in_flight);
+      };
+      const failureInFlight = currentInFlight(failureBucket);
+      const admissionInFlight = currentInFlight(admissionBucket);
+      if (
+        failureInFlight >= policy.maxConcurrent ||
+        admissionInFlight >= policy.maxConcurrent ||
+        tokens < 1
+      ) {
+        return false;
+      }
+      for (const keyHash of orderedKeys) {
+        if (keyHash === keys.failureKeyHash) {
+          await tx.execute(
+            `UPDATE ${IDENTITY_LOGIN_THROTTLE_TABLE}
+             SET tokens = $2,
+                 last_refilled_at = $3,
+                 in_flight = $4,
+                 updated_at = $3
+             WHERE key_hash = $1`,
+            [keyHash, tokens - 1, now.toISOString(), failureInFlight + 1],
+          );
+        } else {
+          await tx.execute(
+            `UPDATE ${IDENTITY_LOGIN_THROTTLE_TABLE}
+             SET in_flight = $2,
+                 updated_at = $3
+             WHERE key_hash = $1`,
+            [keyHash, admissionInFlight + 1, now.toISOString()],
+          );
+        }
+      }
       return true;
     });
   }
 
   async completeAuthAttempt(
-    keyHash: string,
+    keys: IdentityAuthAttemptKeys,
     now: Date,
     outcome: "success" | "failure",
     policy: IdentityThrottlePolicy,
   ): Promise<void> {
+    if (keys.failureKeyHash === keys.admissionKeyHash) {
+      throw lifecycleFailure("invalid_configuration", "auth admission keys must be distinct", 500);
+    }
+    const orderedKeys = [keys.failureKeyHash, keys.admissionKeyHash].sort();
     await this.client.transaction(async (tx) => {
-      const row = await tx.get<ThrottleRow>(
-        `SELECT * FROM ${IDENTITY_LOGIN_THROTTLE_TABLE}
-         WHERE key_hash = $1
-         FOR UPDATE`,
-        [keyHash],
-      );
-      if (row === null) return;
-      let failures = outcome === "success" ? 0 : Number(row.failures) + 1;
-      let windowStartedAt = iso(row.window_started_at);
+      const buckets = new Map<string, ThrottleRow>();
+      for (const keyHash of orderedKeys) {
+        const row = await tx.get<ThrottleRow>(
+          `SELECT * FROM ${IDENTITY_LOGIN_THROTTLE_TABLE}
+           WHERE key_hash = $1
+           FOR UPDATE`,
+          [keyHash],
+        );
+        if (row !== null) buckets.set(keyHash, row);
+      }
+      const failureBucket = buckets.get(keys.failureKeyHash);
+      const admissionBucket = buckets.get(keys.admissionKeyHash);
+      let failures =
+        failureBucket === undefined
+          ? 0
+          : outcome === "success"
+            ? 0
+            : Number(failureBucket.failures) + 1;
+      let windowStartedAt =
+        failureBucket === undefined ? now.toISOString() : iso(failureBucket.window_started_at);
       if (
+        failureBucket !== undefined &&
         outcome === "failure" &&
-        new Date(row.window_started_at).getTime() < now.getTime() - policy.windowSeconds * 1_000
+        new Date(failureBucket.window_started_at).getTime() <
+          now.getTime() - policy.windowSeconds * 1_000
       ) {
         failures = 1;
         windowStartedAt = now.toISOString();
@@ -617,16 +698,28 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
         outcome === "failure" && failures >= policy.maxFailures
           ? new Date(now.getTime() + policy.lockSeconds * 1_000).toISOString()
           : null;
-      await tx.execute(
-        `UPDATE ${IDENTITY_LOGIN_THROTTLE_TABLE}
-         SET failures = $2,
-             window_started_at = $3,
-             locked_until = $4,
-             in_flight = GREATEST(0, in_flight - 1),
-             updated_at = $5
-         WHERE key_hash = $1`,
-        [keyHash, failures, windowStartedAt, lockedUntil, now.toISOString()],
-      );
+      for (const keyHash of orderedKeys) {
+        if (keyHash === keys.failureKeyHash && failureBucket !== undefined) {
+          await tx.execute(
+            `UPDATE ${IDENTITY_LOGIN_THROTTLE_TABLE}
+             SET failures = $2,
+                 window_started_at = $3,
+                 locked_until = $4,
+                 in_flight = GREATEST(0, in_flight - 1),
+                 updated_at = $5
+             WHERE key_hash = $1`,
+            [keyHash, failures, windowStartedAt, lockedUntil, now.toISOString()],
+          );
+        } else if (keyHash === keys.admissionKeyHash && admissionBucket !== undefined) {
+          await tx.execute(
+            `UPDATE ${IDENTITY_LOGIN_THROTTLE_TABLE}
+             SET in_flight = GREATEST(0, in_flight - 1),
+                 updated_at = $2
+             WHERE key_hash = $1`,
+            [keyHash, now.toISOString()],
+          );
+        }
+      }
     });
   }
 
@@ -671,34 +764,39 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
   }
 
   async createInvite(
-    invite: IdentityInviteRecord,
+    invite: IdentityInviteCreation,
     authorization?: {
       actorTokenScopes: readonly string[];
       inviteManagementScope: string;
     },
   ): Promise<void> {
     await this.client.transaction(async (tx) => {
+      const tenant = await tx.get<{ allowed_scopes: unknown }>(
+        `SELECT allowed_scopes
+         FROM ${IDENTITY_TENANTS_TABLE}
+         WHERE id = $1
+         FOR UPDATE`,
+        [invite.tenantId],
+      );
       const actor = await tx.get<{
         role: "owner" | "admin" | "member";
         scopes: unknown;
         membership_status: "active" | "suspended";
         user_status: "active" | "disabled" | "deleted";
-        allowed_scopes: unknown;
       }>(
         `SELECT
            membership.role,
            membership.scopes,
            membership.status AS membership_status,
-           actor_user.status AS user_status,
-           tenant.allowed_scopes
+           actor_user.status AS user_status
          FROM ${IDENTITY_MEMBERSHIPS_TABLE} membership
          JOIN ${IDENTITY_USERS_TABLE} actor_user ON actor_user.id = membership.user_id
-         JOIN ${IDENTITY_TENANTS_TABLE} tenant ON tenant.id = membership.tenant_id
          WHERE membership.tenant_id = $1 AND membership.user_id = $2
-         FOR UPDATE OF membership, actor_user, tenant`,
+         FOR UPDATE OF membership, actor_user`,
         [invite.tenantId, invite.createdByUserId],
       );
       if (
+        tenant === null ||
         actor === null ||
         actor.user_status !== "active" ||
         actor.membership_status !== "active" ||
@@ -712,7 +810,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
       if (
         !scopeSubset(invite.scopes, authorization.actorTokenScopes) ||
         !scopeSubset(invite.scopes, parseScopes(actor.scopes)) ||
-        !scopeSubset(invite.scopes, parseScopes(actor.allowed_scopes))
+        !scopeSubset(invite.scopes, parseScopes(tenant.allowed_scopes))
       ) {
         throw lifecycleFailure("invalid_scope", "requested scope is not allowed", 403);
       }
@@ -727,7 +825,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
           invite.tokenHash,
           invite.identifierKind ?? null,
           invite.normalizedIdentifier ?? null,
-          invite.managementScope ?? authorization.inviteManagementScope,
+          authorization.inviteManagementScope,
           invite.role,
           JSON.stringify(invite.scopes),
           invite.expiresAt,
@@ -768,23 +866,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
       if (input.family.scopes.length === 0) {
         throw lifecycleFailure("invalid_scope", "requested scope is not allowed", 403);
       }
-      await tx.execute(
-        `INSERT INTO ${IDENTITY_SESSION_FAMILIES_TABLE}
-           (id, session_hash, user_id, tenant_id, scopes, status, expires_at, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)`,
-        [
-          input.family.id,
-          hashOpaqueClaim(input.family.id),
-          input.family.userId,
-          input.family.tenantId,
-          JSON.stringify(input.family.scopes),
-          input.family.status,
-          input.family.expiresAt,
-          input.family.createdAt,
-          input.family.updatedAt,
-        ],
-      );
-      await insertRefreshToken(tx, input.refresh);
+      await insertSessionMutation(tx, input);
     });
   }
 
@@ -1340,6 +1422,29 @@ async function insertOneTimeToken(
       token.createdAt,
     ],
   );
+}
+
+async function insertSessionMutation(
+  client: TypedQueryClient,
+  input: CreateSessionMutation,
+): Promise<void> {
+  await client.execute(
+    `INSERT INTO ${IDENTITY_SESSION_FAMILIES_TABLE}
+       (id, session_hash, user_id, tenant_id, scopes, status, expires_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)`,
+    [
+      input.family.id,
+      hashOpaqueClaim(input.family.id),
+      input.family.userId,
+      input.family.tenantId,
+      JSON.stringify(input.family.scopes),
+      input.family.status,
+      input.family.expiresAt,
+      input.family.createdAt,
+      input.family.updatedAt,
+    ],
+  );
+  await insertRefreshToken(client, input.refresh);
 }
 
 async function insertRefreshToken(

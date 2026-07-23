@@ -94,7 +94,7 @@ export interface IdentityInviteRecord {
   tokenHash: string;
   identifierKind?: LoginIdentifierKind;
   normalizedIdentifier?: string;
-  managementScope?: string;
+  managementScope: string;
   role: IdentityMembershipRole;
   scopes: string[];
   expiresAt: string;
@@ -184,6 +184,13 @@ export interface IdentityThrottlePolicy {
   lockSeconds: number;
   maxConcurrent: number;
 }
+
+export interface IdentityAuthAttemptKeys {
+  failureKeyHash: string;
+  admissionKeyHash: string;
+}
+
+export type IdentityInviteCreation = Omit<IdentityInviteRecord, "managementScope">;
 
 export interface IdentityLifecycleSnapshot {
   users: IdentityUserRecord[];
@@ -309,6 +316,7 @@ export interface RegistrationMutation {
   personalTenant: IdentityTenantRecord;
   ownerMembership: IdentityMembershipRecord;
   verification: IdentityOneTimeTokenRecord;
+  initialSession: CreateSessionMutation;
 }
 
 export interface RegistrationResult {
@@ -316,7 +324,10 @@ export interface RegistrationResult {
   tenant: IdentityTenantRecord;
   membership: IdentityMembershipRecord;
   identifier: IdentityLoginIdentifierRecord;
+  initialSession: CreateSessionMutation;
 }
+
+type SessionRegistrationContext = Omit<RegistrationResult, "initialSession">;
 
 export interface LoginCandidate {
   user: IdentityUserRecord;
@@ -353,15 +364,19 @@ export interface IdentityLifecycleStore extends IdentityTokenStateStore {
     policy: { maxFailures: number; windowSeconds: number; lockSeconds: number },
   ): Promise<void>;
   clearLoginFailures(keyHash: string): Promise<void>;
-  reserveAuthAttempt?(keyHash: string, now: Date, policy: IdentityThrottlePolicy): Promise<boolean>;
+  reserveAuthAttempt?(
+    keys: IdentityAuthAttemptKeys,
+    now: Date,
+    policy: IdentityThrottlePolicy,
+  ): Promise<boolean>;
   completeAuthAttempt?(
-    keyHash: string,
+    keys: IdentityAuthAttemptKeys,
     now: Date,
     outcome: "success" | "failure",
     policy: IdentityThrottlePolicy,
   ): Promise<void>;
   createInvite(
-    invite: IdentityInviteRecord,
+    invite: IdentityInviteCreation,
     authorization?: {
       actorTokenScopes: readonly string[];
       inviteManagementScope: string;
@@ -542,7 +557,7 @@ export class InMemoryIdentityLifecycleStore implements IdentityLifecycleStore {
           creator === undefined ||
           creatorMembership === undefined ||
           !roleCanAssign(creatorMembership.role, invite.role) ||
-          !creatorMembership.scopes.includes(invite.managementScope ?? DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE) ||
+          !creatorMembership.scopes.includes(invite.managementScope) ||
           !isScopeSubset(invite.scopes, creatorMembership.scopes) ||
           !isScopeSubset(invite.scopes, tenantAllowedScopes(invitedTenant))
         ) {
@@ -571,22 +586,45 @@ export class InMemoryIdentityLifecycleStore implements IdentityLifecycleStore {
         };
       }
 
+      const insertsTenant = !this.state.tenants.some((candidate) => candidate.id === tenant.id);
+      if (
+        insertsTenant &&
+        this.state.tenants.some((candidate) => candidate.slug === tenant.slug)
+      ) {
+        throw lifecycleError("duplicate_identifier");
+      }
+      const initialSession = structuredClone(input.initialSession);
+      initialSession.family.userId = input.user.id;
+      initialSession.family.tenantId = tenant.id;
+      initialSession.family.scopes = intersectScopes(
+        initialSession.family.scopes,
+        membership.scopes,
+        tenantAllowedScopes(tenant),
+      );
+      if (initialSession.family.scopes.length === 0) throw lifecycleError("invalid_scope");
+      initialSession.refresh.familyId = initialSession.family.id;
+
       this.state.users.push(input.user);
       this.state.loginIdentifiers.push(input.identifier);
       this.state.credentials.push(input.credential);
-      if (!this.state.tenants.some((candidate) => candidate.id === tenant.id)) {
-        if (this.state.tenants.some((candidate) => candidate.slug === tenant.slug)) {
-          throw lifecycleError("duplicate_identifier");
-        }
+      if (insertsTenant) {
         this.state.tenants.push(tenant);
       }
       this.state.memberships.push(membership);
       this.state.oneTimeTokens.push(input.verification);
+      this.state.sessionFamilies.push(structuredClone(initialSession.family));
+      this.state.refreshTokens.push(structuredClone(initialSession.refresh));
       if (invite !== undefined) {
         invite.consumedAt = input.user.createdAt;
         invite.consumedByUserId = input.user.id;
       }
-      return structuredClone({ user: input.user, tenant, membership, identifier: input.identifier });
+      return structuredClone({
+        user: input.user,
+        tenant,
+        membership,
+        identifier: input.identifier,
+        initialSession,
+      });
     });
   }
 
@@ -624,68 +662,108 @@ export class InMemoryIdentityLifecycleStore implements IdentityLifecycleStore {
   }
 
   async reserveAuthAttempt(
-    keyHash: string,
+    keys: IdentityAuthAttemptKeys,
     now: Date,
     policy: IdentityThrottlePolicy,
   ): Promise<boolean> {
     return this.exclusive(() => {
-      let throttle = this.state.loginThrottles.find((candidate) => candidate.keyHash === keyHash);
-      if (throttle === undefined) {
+      if (keys.failureKeyHash === keys.admissionKeyHash) {
+        throw lifecycleError("invalid_configuration");
+      }
+      const getOrCreate = (keyHash: string): IdentityLoginThrottleRecord => {
+        let throttle = this.state.loginThrottles.find((candidate) => candidate.keyHash === keyHash);
+        if (throttle !== undefined) return throttle;
         throttle = {
           keyHash,
           failures: 0,
           windowStartedAt: now.toISOString(),
-          tokens: policy.maxFailures - 1,
+          tokens: policy.maxFailures,
           lastRefilledAt: now.toISOString(),
-          inFlight: 1,
+          inFlight: 0,
           updatedAt: now.toISOString(),
         };
         this.state.loginThrottles.push(throttle);
-        return true;
+        return throttle;
+      };
+      const failureBucket = getOrCreate(keys.failureKeyHash);
+      const admissionBucket = getOrCreate(keys.admissionKeyHash);
+      if (
+        failureBucket.lockedUntil !== undefined &&
+        new Date(failureBucket.lockedUntil) > now
+      ) {
+        return false;
       }
-      if (throttle.lockedUntil !== undefined && new Date(throttle.lockedUntil) > now) return false;
-      const lastRefilledAt = new Date(throttle.lastRefilledAt ?? throttle.windowStartedAt);
+      const lastRefilledAt = new Date(
+        failureBucket.lastRefilledAt ?? failureBucket.windowStartedAt,
+      );
       const elapsedSeconds = Math.max(0, (now.getTime() - lastRefilledAt.getTime()) / 1_000);
       const refillRate = policy.maxFailures / policy.windowSeconds;
-      const tokens = Math.min(policy.maxFailures, (throttle.tokens ?? policy.maxFailures) + elapsedSeconds * refillRate);
-      const reservationIsStale =
-        throttle.updatedAt !== undefined &&
-        new Date(throttle.updatedAt).getTime() <= now.getTime() - policy.windowSeconds * 1_000;
-      const inFlight = reservationIsStale ? 0 : throttle.inFlight ?? 0;
-      if (inFlight >= policy.maxConcurrent || tokens < 1) return false;
-      throttle.tokens = tokens - 1;
-      throttle.lastRefilledAt = now.toISOString();
-      throttle.inFlight = inFlight + 1;
-      throttle.updatedAt = now.toISOString();
+      const tokens = Math.min(
+        policy.maxFailures,
+        (failureBucket.tokens ?? policy.maxFailures) + elapsedSeconds * refillRate,
+      );
+      const currentInFlight = (bucket: IdentityLoginThrottleRecord): number => {
+        const reservationIsStale =
+          bucket.updatedAt !== undefined &&
+          new Date(bucket.updatedAt).getTime() <=
+            now.getTime() - policy.windowSeconds * 1_000;
+        return reservationIsStale ? 0 : bucket.inFlight ?? 0;
+      };
+      const failureInFlight = currentInFlight(failureBucket);
+      const admissionInFlight = currentInFlight(admissionBucket);
+      if (
+        failureInFlight >= policy.maxConcurrent ||
+        admissionInFlight >= policy.maxConcurrent ||
+        tokens < 1
+      ) {
+        return false;
+      }
+      failureBucket.tokens = tokens - 1;
+      failureBucket.lastRefilledAt = now.toISOString();
+      failureBucket.inFlight = failureInFlight + 1;
+      failureBucket.updatedAt = now.toISOString();
+      admissionBucket.inFlight = admissionInFlight + 1;
+      admissionBucket.updatedAt = now.toISOString();
       return true;
     });
   }
 
   async completeAuthAttempt(
-    keyHash: string,
+    keys: IdentityAuthAttemptKeys,
     now: Date,
     outcome: "success" | "failure",
     policy: IdentityThrottlePolicy,
   ): Promise<void> {
     await this.exclusive(() => {
-      const throttle = this.state.loginThrottles.find((candidate) => candidate.keyHash === keyHash);
-      if (throttle === undefined) return;
-      throttle.inFlight = Math.max(0, (throttle.inFlight ?? 0) - 1);
-      throttle.updatedAt = now.toISOString();
+      const failureBucket = this.state.loginThrottles.find(
+        (candidate) => candidate.keyHash === keys.failureKeyHash,
+      );
+      const admissionBucket = this.state.loginThrottles.find(
+        (candidate) => candidate.keyHash === keys.admissionKeyHash,
+      );
+      if (failureBucket !== undefined) {
+        failureBucket.inFlight = Math.max(0, (failureBucket.inFlight ?? 0) - 1);
+        failureBucket.updatedAt = now.toISOString();
+      }
+      if (admissionBucket !== undefined) {
+        admissionBucket.inFlight = Math.max(0, (admissionBucket.inFlight ?? 0) - 1);
+        admissionBucket.updatedAt = now.toISOString();
+      }
+      if (failureBucket === undefined) return;
       if (outcome === "success") {
-        throttle.failures = 0;
-        delete throttle.lockedUntil;
+        failureBucket.failures = 0;
+        delete failureBucket.lockedUntil;
         return;
       }
       const windowCutoff = now.getTime() - policy.windowSeconds * 1_000;
-      if (new Date(throttle.windowStartedAt).getTime() < windowCutoff) {
-        throttle.windowStartedAt = now.toISOString();
-        throttle.failures = 1;
+      if (new Date(failureBucket.windowStartedAt).getTime() < windowCutoff) {
+        failureBucket.windowStartedAt = now.toISOString();
+        failureBucket.failures = 1;
       } else {
-        throttle.failures += 1;
+        failureBucket.failures += 1;
       }
-      if (throttle.failures >= policy.maxFailures) {
-        throttle.lockedUntil = addSeconds(now, policy.lockSeconds).toISOString();
+      if (failureBucket.failures >= policy.maxFailures) {
+        failureBucket.lockedUntil = addSeconds(now, policy.lockSeconds).toISOString();
       }
     });
   }
@@ -725,7 +803,7 @@ export class InMemoryIdentityLifecycleStore implements IdentityLifecycleStore {
   }
 
   async createInvite(
-    invite: IdentityInviteRecord,
+    invite: IdentityInviteCreation,
     authorization?: {
       actorTokenScopes: readonly string[];
       inviteManagementScope: string;
@@ -761,7 +839,10 @@ export class InMemoryIdentityLifecycleStore implements IdentityLifecycleStore {
       ) {
         throw lifecycleError("invalid_scope");
       }
-      this.state.invites.push(structuredClone(invite));
+      this.state.invites.push(structuredClone({
+        ...invite,
+        managementScope: authorization.inviteManagementScope,
+      }));
     });
   }
 
@@ -1343,6 +1424,12 @@ export class IdentityLifecycleService {
       expiresAt: addSeconds(now, this.verificationTtlSeconds).toISOString(),
       createdAt: now.toISOString(),
     };
+    const initialSession = this.prepareSessionMutation(
+      userId,
+      personalTenant.id,
+      this.defaultScopes,
+      now,
+    );
     const result = await this.store.register({
       bootstrapOnly,
       policy: this.registrationPolicy,
@@ -1354,6 +1441,7 @@ export class IdentityLifecycleService {
       personalTenant,
       ownerMembership,
       verification,
+      initialSession: initialSession.mutation,
     });
     if (this.hooks.deliverVerification !== undefined) {
       await this.hooks.deliverVerification({
@@ -1363,7 +1451,12 @@ export class IdentityLifecycleService {
         expiresAt: verification.expiresAt,
       });
     }
-    return this.createSession(result);
+    return this.issueSession(
+      result,
+      result.initialSession,
+      initialSession.refreshToken,
+      now,
+    );
   }
 
   async login(input: {
@@ -1376,16 +1469,26 @@ export class IdentityLifecycleService {
     await this.ready();
     const now = this.now();
     const normalized = normalizeLoginIdentifier(input.identifier);
-    const throttleKey = hashSecret(
-      `${normalized.kind}:${normalized.value}:${requiredText(input.throttleKey ?? "default", "throttleKey", 512)}`,
-    );
+    const throttleClient = requiredText(input.throttleKey ?? "default", "throttleKey", 512);
+    const attemptKeys: IdentityAuthAttemptKeys = {
+      failureKeyHash: hashSecret(JSON.stringify([
+        "identity-login-failure-v1",
+        normalized.kind,
+        normalized.value,
+        throttleClient,
+      ])),
+      admissionKeyHash: hashSecret(JSON.stringify([
+        "identity-auth-client-admission-v1",
+        throttleClient,
+      ])),
+    };
     if (
       this.store.reserveAuthAttempt === undefined ||
       this.store.completeAuthAttempt === undefined
     ) {
       throw lifecycleError("invalid_configuration");
     }
-    if (!(await this.store.reserveAuthAttempt(throttleKey, now, this.loginThrottle))) {
+    if (!(await this.store.reserveAuthAttempt(attemptKeys, now, this.loginThrottle))) {
       throw lifecycleError("rate_limited");
     }
     let outcome: "success" | "failure" = "failure";
@@ -1415,7 +1518,7 @@ export class IdentityLifecycleService {
       outcome = "success";
       return session;
     } finally {
-      await this.store.completeAuthAttempt(throttleKey, this.now(), outcome, this.loginThrottle);
+      await this.store.completeAuthAttempt(attemptKeys, this.now(), outcome, this.loginThrottle);
     }
   }
 
@@ -1439,13 +1542,12 @@ export class IdentityLifecycleService {
       60,
       2_592_000,
     );
-    const invite: IdentityInviteRecord = {
+    const invite: IdentityInviteCreation = {
       id: `inv_${randomUUID()}`,
       tenantId: input.tenantId,
       tokenHash: hashSecret(token),
       identifierKind: normalized?.kind,
       normalizedIdentifier: normalized?.value,
-      managementScope: this.inviteManagementScope,
       role: normalizeRole(input.role),
       scopes: normalizeScopes(input.scopes),
       expiresAt: addSeconds(now, expiresInSeconds).toISOString(),
@@ -1623,20 +1725,26 @@ export class IdentityLifecycleService {
     await this.ready();
     const normalized = normalizeLoginIdentifier(input.identifier);
     const now = this.now();
-    const throttleKey = hashSecret(
-      `recovery:${normalized.kind}:${normalized.value}:${requiredText(
-        input.throttleKey ?? "default",
-        "throttleKey",
-        512,
-      )}`,
-    );
+    const throttleClient = requiredText(input.throttleKey ?? "default", "throttleKey", 512);
+    const attemptKeys: IdentityAuthAttemptKeys = {
+      failureKeyHash: hashSecret(JSON.stringify([
+        "identity-recovery-failure-v1",
+        normalized.kind,
+        normalized.value,
+        throttleClient,
+      ])),
+      admissionKeyHash: hashSecret(JSON.stringify([
+        "identity-auth-client-admission-v1",
+        throttleClient,
+      ])),
+    };
     if (
       this.store.reserveAuthAttempt === undefined ||
       this.store.completeAuthAttempt === undefined
     ) {
       throw lifecycleError("invalid_configuration");
     }
-    if (!(await this.store.reserveAuthAttempt(throttleKey, now, this.loginThrottle))) {
+    if (!(await this.store.reserveAuthAttempt(attemptKeys, now, this.loginThrottle))) {
       return { accepted: true };
     }
     try {
@@ -1669,7 +1777,7 @@ export class IdentityLifecycleService {
       }
       return { accepted: true };
     } finally {
-      await this.store.completeAuthAttempt(throttleKey, this.now(), "failure", this.loginThrottle);
+      await this.store.completeAuthAttempt(attemptKeys, this.now(), "failure", this.loginThrottle);
     }
   }
 
@@ -1690,14 +1798,35 @@ export class IdentityLifecycleService {
   }
 
   private async createSession(
-    registration: RegistrationResult,
+    registration: SessionRegistrationContext,
     scopes: readonly string[] = registration.membership.scopes,
   ): Promise<IdentityAuthSession> {
     const now = this.now();
+    const prepared = this.prepareSessionMutation(
+      registration.user.id,
+      registration.tenant.id,
+      scopes,
+      now,
+    );
+    await this.store.createSession(prepared.mutation);
+    return this.issueSession(
+      registration,
+      prepared.mutation,
+      prepared.refreshToken,
+      now,
+    );
+  }
+
+  private prepareSessionMutation(
+    userId: string,
+    tenantId: string,
+    scopes: readonly string[],
+    now: Date,
+  ): { mutation: CreateSessionMutation; refreshToken: string } {
     const family: IdentitySessionFamilyRecord = {
       id: `ses_${randomUUID()}`,
-      userId: registration.user.id,
-      tenantId: registration.tenant.id,
+      userId,
+      tenantId,
       scopes: [...scopes],
       status: "active",
       expiresAt: addSeconds(now, this.refreshTokenTtlSeconds).toISOString(),
@@ -1713,7 +1842,19 @@ export class IdentityLifecycleService {
       expiresAt: family.expiresAt,
       createdAt: now.toISOString(),
     };
-    await this.store.createSession({ family, refresh });
+    return {
+      mutation: { family, refresh },
+      refreshToken,
+    };
+  }
+
+  private async issueSession(
+    registration: SessionRegistrationContext,
+    session: CreateSessionMutation,
+    refreshToken: string,
+    now: Date,
+  ): Promise<IdentityAuthSession> {
+    const { family, refresh } = session;
     const issue = await this.tokenIssuer.issue({
       subject: registration.user.id,
       tenant: registration.tenant.id,

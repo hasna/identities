@@ -50,7 +50,12 @@ membership must be active, the access token and persisted membership must both
 hold the configured invite-management scope, the invited role cannot outrank
 the actor, and invited scopes must be a subset of the token, membership, and
 tenant allowlist. Invite consumption rechecks persisted role and scope
-authority before creating the membership.
+authority while holding the current tenant allowlist row lock. The store
+persists only its authorization input's configured management scope; a caller
+cannot substitute a weaker scope on the invite record. Registration,
+membership creation, invite consumption, and the initial session family commit
+in one transaction, so a concurrent allowlist change cannot leave a partial
+account after initial-session validation fails.
 
 ## Credentials and login
 
@@ -62,9 +67,11 @@ Unknown users, incorrect passwords, disabled users, deleted users, and tenant
 mismatches return the same authentication failure. Unknown users still verify
 against a cached Argon2id dummy hash. Throttle keys hash the normalized
 identifier and the embedding runtime's client key; failures and lock expiry are
-updated atomically. A persisted token bucket and in-flight reservation cap
-admit work before password verification, so concurrent requests cannot all
-enter the expensive password path after the same check.
+updated atomically. A separate client-wide admission key applies the in-flight
+cap across distinct identifiers and across login and recovery. PostgreSQL locks
+all participating buckets in deterministic key order and every admitted path
+releases both reservations in `finally`, so identifier fan-out cannot multiply
+the expensive password work.
 
 Login selects one persisted membership. Requested scopes must be a non-empty
 subset of that membership's scopes. Tokens bind `sub`, `tenant`, `session`,

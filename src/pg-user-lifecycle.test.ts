@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { exportJWK, generateKeyPair, type CryptoKey, type JWK, type KeyObject } from "jose";
 import { Pool } from "pg";
 import { createQueryClient, type PoolQueryClient } from "./generated/storage-kit/query.js";
@@ -12,9 +13,11 @@ import { PgIdentityLifecycleStore } from "./pg-user-lifecycle.js";
 import { runIdentitiesMigrations } from "./pg-store.js";
 import {
   Argon2idIdentityPasswordHasher,
+  DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE,
   IdentityLifecycleError,
   IdentityLifecycleService,
   identityLifecycleMigrations,
+  type IdentityInviteRecord,
 } from "./user-lifecycle.js";
 
 const databaseUrl = process.env["TEST_DATABASE_URL"];
@@ -328,10 +331,14 @@ describeLive("PgIdentityLifecycleStore live Postgres", () => {
       reason: "token_revoked",
     });
 
-    const throttleKey = "a".repeat(64);
+    const admissionKeyHash = "f".repeat(64);
+    const attemptKeys = Array.from({ length: 8 }, (_, index) => ({
+      failureKeyHash: (index + 1).toString(16).padStart(64, "0"),
+      admissionKeyHash,
+    }));
     const admitted = await Promise.all(
-      Array.from({ length: 6 }, () =>
-        live.store.reserveAuthAttempt(throttleKey, new Date(), {
+      attemptKeys.map((keys) =>
+        live.store.reserveAuthAttempt(keys, new Date(), {
           maxFailures: 3,
           windowSeconds: 300,
           lockSeconds: 300,
@@ -341,30 +348,44 @@ describeLive("PgIdentityLifecycleStore live Postgres", () => {
     );
     expect(admitted.filter(Boolean)).toHaveLength(2);
     await Promise.all(
-      admitted.filter(Boolean).map(() =>
-        live.store.completeAuthAttempt(throttleKey, new Date(), "failure", {
-          maxFailures: 3,
-          windowSeconds: 300,
-          lockSeconds: 300,
-          maxConcurrent: 2,
-        }),
+      admitted.map((accepted, index) =>
+        accepted
+          ? live.store.completeAuthAttempt(attemptKeys[index]!, new Date(), "failure", {
+              maxFailures: 3,
+              windowSeconds: 300,
+              lockSeconds: 300,
+              maxConcurrent: 2,
+            })
+          : Promise.resolve(),
       ),
     );
-    await client.execute(
-      `UPDATE identity_login_throttle
-       SET tokens = 2, in_flight = 2, updated_at = now() - interval '301 seconds'
-       WHERE key_hash = $1`,
-      [throttleKey],
-    );
+    const staleKeys = {
+      failureKeyHash: "c".repeat(64),
+      admissionKeyHash: "d".repeat(64),
+    };
     expect(
-      await live.store.reserveAuthAttempt(throttleKey, new Date(), {
+      await live.store.reserveAuthAttempt(staleKeys, new Date(), {
         maxFailures: 3,
         windowSeconds: 300,
         lockSeconds: 300,
         maxConcurrent: 2,
       }),
     ).toBe(true);
-    await live.store.completeAuthAttempt(throttleKey, new Date(), "failure", {
+    await client.execute(
+      `UPDATE identity_login_throttle
+       SET tokens = 2, in_flight = 2, updated_at = now() - interval '301 seconds'
+       WHERE key_hash = ANY($1::text[])`,
+      [[staleKeys.failureKeyHash, staleKeys.admissionKeyHash]],
+    );
+    expect(
+      await live.store.reserveAuthAttempt(staleKeys, new Date(), {
+        maxFailures: 3,
+        windowSeconds: 300,
+        lockSeconds: 300,
+        maxConcurrent: 2,
+      }),
+    ).toBe(true);
+    await live.store.completeAuthAttempt(staleKeys, new Date(), "failure", {
       maxFailures: 3,
       windowSeconds: 300,
       lockSeconds: 300,
@@ -478,5 +499,218 @@ describeLive("PgIdentityLifecycleStore live Postgres", () => {
       displayName: "PG Stale Invite",
       inviteToken: staleInvite.token,
     })).rejects.toMatchObject({ reason: "invite_invalid" });
+  });
+
+  test("serializes invite scope changes with registration and rolls back the whole initial session", async () => {
+    const live = service("invite");
+    const ownerTenant = await client.one<{ id: string }>(
+      "SELECT id FROM identity_tenants WHERE slug = 'infinity-pg'",
+    );
+    await client.execute(
+      `UPDATE identity_memberships
+       SET scopes = scopes || $2::jsonb
+       WHERE tenant_id = $1 AND role = 'owner'`,
+      [
+        ownerTenant.id,
+        JSON.stringify([DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE]),
+      ],
+    );
+    const owner = await live.service.login({
+      identifier: { kind: "email", value: "owner@pg.example.test" },
+      password: "correct horse battery staple",
+      tenantId: ownerTenant.id,
+      throttleKey: "review-b-interleave-owner",
+    });
+    const invite = await live.service.createInvite({
+      actorAccessToken: owner.accessToken,
+      tenantId: ownerTenant.id,
+      identifier: { kind: "email", value: "pg-interleaved-scope@example.test" },
+      role: "member",
+      scopes: ["runs:read"],
+    });
+
+    const blocker = await client.pool.connect();
+    let transactionOpen = false;
+    let signup:
+      | ReturnType<IdentityLifecycleService["signup"]>
+      | undefined;
+    let observedLockWait = false;
+    try {
+      await blocker.query("BEGIN");
+      transactionOpen = true;
+      await blocker.query(
+        "SELECT id FROM identity_tenants WHERE id = $1 FOR UPDATE",
+        [ownerTenant.id],
+      );
+      signup = live.service.signup({
+        identifier: { kind: "email", value: "pg-interleaved-scope@example.test" },
+        password: "a sufficiently strong password",
+        displayName: "PG Interleaved Scope",
+        inviteToken: invite.token,
+      });
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const state = await client.one<{ waiting: boolean; partial_user: boolean }>(
+          `SELECT
+             EXISTS (
+               SELECT 1
+               FROM pg_stat_activity
+               WHERE datname = current_database()
+                 AND pid <> pg_backend_pid()
+                 AND wait_event_type = 'Lock'
+             ) AS waiting,
+             EXISTS (
+               SELECT 1
+               FROM identity_login_identifiers
+               WHERE normalized_value = 'pg-interleaved-scope@example.test'
+             ) AS partial_user`,
+        );
+        if (state.waiting || state.partial_user) {
+          observedLockWait = true;
+          break;
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      }
+      await blocker.query(
+        "UPDATE identity_tenants SET allowed_scopes = allowed_scopes - 'runs:read' WHERE id = $1",
+        [ownerTenant.id],
+      );
+      await blocker.query("COMMIT");
+      transactionOpen = false;
+    } finally {
+      if (transactionOpen) await blocker.query("ROLLBACK");
+      blocker.release();
+    }
+
+    const signupOutcome = await signup!.catch((error) => error);
+    const persisted = await client.one<{
+      users: string;
+      memberships: string;
+      sessions: string;
+      consumed_at: Date | string | null;
+    }>(
+      `SELECT
+         (SELECT count(*)::text
+          FROM identity_users identity_user
+          JOIN identity_login_identifiers identifier ON identifier.user_id = identity_user.id
+          WHERE identifier.normalized_value = 'pg-interleaved-scope@example.test') AS users,
+         (SELECT count(*)::text
+          FROM identity_memberships membership
+          JOIN identity_login_identifiers identifier ON identifier.user_id = membership.user_id
+          WHERE identifier.normalized_value = 'pg-interleaved-scope@example.test') AS memberships,
+         (SELECT count(*)::text
+          FROM identity_session_families family
+          JOIN identity_login_identifiers identifier ON identifier.user_id = family.user_id
+          WHERE identifier.normalized_value = 'pg-interleaved-scope@example.test') AS sessions,
+         consumed_at
+       FROM identity_invites
+       WHERE id = $1`,
+      [invite.id],
+    );
+    await client.transaction(async (tx) => {
+      const partialUser = await tx.get<{ user_id: string }>(
+        `SELECT user_id FROM identity_login_identifiers
+         WHERE normalized_value = 'pg-interleaved-scope@example.test'`,
+      );
+      await tx.execute("DELETE FROM identity_invites WHERE id = $1", [invite.id]);
+      if (partialUser !== null) {
+        await tx.execute("DELETE FROM identity_issued_access_tokens WHERE user_id = $1", [partialUser.user_id]);
+        await tx.execute(
+          `DELETE FROM identity_refresh_tokens
+           WHERE family_id IN (SELECT id FROM identity_session_families WHERE user_id = $1)`,
+          [partialUser.user_id],
+        );
+        await tx.execute("DELETE FROM identity_session_families WHERE user_id = $1", [partialUser.user_id]);
+        await tx.execute("DELETE FROM identity_one_time_tokens WHERE user_id = $1", [partialUser.user_id]);
+        await tx.execute("DELETE FROM identity_password_credentials WHERE user_id = $1", [partialUser.user_id]);
+        await tx.execute("DELETE FROM identity_memberships WHERE user_id = $1", [partialUser.user_id]);
+        await tx.execute("DELETE FROM identity_login_identifiers WHERE user_id = $1", [partialUser.user_id]);
+        await tx.execute("DELETE FROM identity_users WHERE id = $1", [partialUser.user_id]);
+      }
+      await tx.execute(
+        "UPDATE identity_tenants SET allowed_scopes = allowed_scopes || '[\"runs:read\"]'::jsonb WHERE id = $1",
+        [ownerTenant.id],
+      );
+    });
+    expect(persisted).toMatchObject({
+      users: "0",
+      memberships: "0",
+      sessions: "0",
+      consumed_at: null,
+    });
+    expect(observedLockWait).toBe(true);
+    expect(signupOutcome).toMatchObject({ reason: "invite_invalid" });
+  }, 15_000);
+
+  test("persists the store authorization scope and rejects use after creator scope loss", async () => {
+    const live = service("invite");
+    const ownerTenant = await client.one<{ id: string }>(
+      "SELECT id FROM identity_tenants WHERE slug = 'infinity-pg'",
+    );
+    await client.execute(
+      `UPDATE identity_memberships
+       SET scopes = scopes || $2::jsonb
+       WHERE tenant_id = $1 AND role = 'owner'`,
+      [ownerTenant.id, JSON.stringify([DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE])],
+    );
+    const owner = await live.service.login({
+      identifier: { kind: "email", value: "owner@pg.example.test" },
+      password: "correct horse battery staple",
+      tenantId: ownerTenant.id,
+      throttleKey: "review-b-authoritative-owner",
+    });
+    const token = "review-b-pg-authoritative-invite-token";
+    const inviteId = "inv_review_b_pg_authoritative_scope";
+    const now = new Date();
+    const forgedInvite: IdentityInviteRecord = {
+      id: inviteId,
+      tenantId: ownerTenant.id,
+      tokenHash: createHash("sha256").update(token).digest("hex"),
+      identifierKind: "email",
+      normalizedIdentifier: "pg-authoritative-scope@example.test",
+      managementScope: "runs:read",
+      role: "member",
+      scopes: ["runs:read"],
+      expiresAt: new Date(now.getTime() + 300_000).toISOString(),
+      createdByUserId: owner.user.id,
+      createdAt: now.toISOString(),
+    };
+    await live.store.createInvite(forgedInvite, {
+      actorTokenScopes: owner.scopes,
+      inviteManagementScope: DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE,
+    });
+    const persisted = await client.one<{ management_scope: string }>(
+      "SELECT management_scope FROM identity_invites WHERE id = $1",
+      [inviteId],
+    );
+    expect(persisted.management_scope).toBe(DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE);
+
+    await client.execute(
+      `UPDATE identity_memberships
+       SET scopes = scopes - $3
+       WHERE tenant_id = $1 AND user_id = $2`,
+      [ownerTenant.id, owner.user.id, DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE],
+    );
+    await expect(live.service.signup({
+      identifier: { kind: "email", value: "pg-authoritative-scope@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "PG Authoritative Scope",
+      inviteToken: token,
+    })).rejects.toMatchObject({ reason: "invite_invalid" });
+    const inviteAfter = await client.one<{ consumed_at: Date | string | null }>(
+      "SELECT consumed_at FROM identity_invites WHERE id = $1",
+      [inviteId],
+    );
+    expect(inviteAfter.consumed_at).toBeNull();
+    await client.execute("DELETE FROM identity_invites WHERE id = $1", [inviteId]);
+    await client.execute(
+      `UPDATE identity_memberships
+       SET scopes = scopes || $3::jsonb
+       WHERE tenant_id = $1 AND user_id = $2`,
+      [
+        ownerTenant.id,
+        owner.user.id,
+        JSON.stringify([DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE]),
+      ],
+    );
   });
 });
