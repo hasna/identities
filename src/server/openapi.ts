@@ -181,9 +181,9 @@ export function buildOpenApiDocument(version: string) {
             tenant: { type: "object", additionalProperties: true },
             membership: { type: "object", additionalProperties: true },
             scopes: { type: "array", items: { type: "string" } },
-            accessToken: { type: "string", writeOnly: true },
+            accessToken: { type: "string", readOnly: true },
             accessTokenExpiresAt: { type: "string", format: "date-time" },
-            refreshToken: { type: "string", writeOnly: true },
+            refreshToken: { type: "string", readOnly: true },
             refreshTokenExpiresAt: { type: "string", format: "date-time" },
           },
           required: [

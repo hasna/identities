@@ -119,6 +119,7 @@ function fixture(
     hasher?: IdentityPasswordHasher;
     recovery?: (input: { userId: string; token: string }) => void | Promise<void>;
     verification?: (input: { userId: string; token: string }) => void | Promise<void>;
+    recoveryMinimumResponseMs?: number;
   } = {},
 ) {
   const auth = authFixture();
@@ -131,6 +132,7 @@ function fixture(
     tokenIssuer: auth.issuer,
     tokenVerifier: auth.verifier,
     now: options.now,
+    recoveryMinimumResponseMs: options.recoveryMinimumResponseMs,
     hooks: {
       deliverRecovery: options.recovery,
       deliverVerification: options.verification,
@@ -455,12 +457,17 @@ describe("verification and recovery", () => {
   test("consumes verification and recovery tokens once and revokes sessions after recovery", async () => {
     const verificationTokens: string[] = [];
     const recoveryTokens: string[] = [];
+    let markRecoveryDelivered!: () => void;
+    const recoveryDelivered = new Promise<void>((resolve) => {
+      markRecoveryDelivered = resolve;
+    });
     const { service, verifier } = fixture("open", {
       verification: ({ token }) => {
         verificationTokens.push(token);
       },
       recovery: ({ token }) => {
         recoveryTokens.push(token);
+        markRecoveryDelivered();
       },
     });
     const session = await firstAdmin(service);
@@ -471,6 +478,7 @@ describe("verification and recovery", () => {
     await service.beginRecovery({
       identifier: { kind: "email", value: "owner@example.test" },
     });
+    await recoveryDelivered;
     expect(recoveryTokens).toHaveLength(1);
     await service.completeRecovery({
       token: recoveryTokens[0]!,
@@ -960,13 +968,12 @@ describe("review-A lifecycle security regressions", () => {
       identifier: { kind: "email", value: "OWNER@EXAMPLE.TEST" },
       throttleKey: "recovery-client",
     });
-    await started;
-    let resolved = false;
+    let responseResolved = false;
     void known.then(() => {
-      resolved = true;
+      responseResolved = true;
     });
-    for (let turn = 0; turn < 20 && !resolved; turn += 1) await Promise.resolve();
-    const resolvedBeforeDelivery = resolved;
+    await started;
+    const resolvedBeforeDelivery = responseResolved;
     releaseDelivery();
     await known;
     expect(resolvedBeforeDelivery).toBe(true);
@@ -1090,4 +1097,76 @@ describe("review-B lifecycle security regressions", () => {
       true,
     );
   });
+});
+
+describe("review-C2 lifecycle security regressions", () => {
+  test("requires an owner or admin role even when a member holds the invite-management scope", async () => {
+    const { service } = fixture("invite");
+    const owner = await firstAdmin(service);
+    const memberInvite = await service.createInvite({
+      actorAccessToken: owner.accessToken,
+      tenantId: owner.tenant.id,
+      identifier: { kind: "email", value: "review-c2-member@example.test" },
+      role: "member",
+      scopes: ["runs:read", DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE],
+    });
+    const member = await service.signup({
+      identifier: { kind: "email", value: "review-c2-member@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "Review C2 Member",
+      inviteToken: memberInvite.token,
+    });
+
+    expect(await errorReason(service.createInvite({
+      actorAccessToken: member.accessToken,
+      tenantId: owner.tenant.id,
+      role: "member",
+      scopes: ["runs:read"],
+    }))).toBe("forbidden");
+  });
+
+  test("keeps known and unknown recovery response distributions behind the same bounded floor", async () => {
+    expect(() => fixture("open", { recoveryMinimumResponseMs: 99 })).toThrow(
+      "recoveryMinimumResponseMs must be an integer between 100 and 5000",
+    );
+    expect(() => fixture("open", { recoveryMinimumResponseMs: 5_001 })).toThrow(
+      "recoveryMinimumResponseMs must be an integer between 100 and 5000",
+    );
+    const { service, store } = fixture("open");
+    await firstAdmin(service);
+    const createOneTimeToken = store.createOneTimeToken.bind(store);
+    store.createOneTimeToken = async (token) => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 40));
+      await createOneTimeToken(token);
+    };
+
+    const knownDurations: number[] = [];
+    const unknownDurations: number[] = [];
+    for (let sample = 0; sample < 4; sample += 1) {
+      let startedAt = performance.now();
+      await service.beginRecovery({
+        identifier: { kind: "email", value: `unknown-c2-${sample}@example.test` },
+        throttleKey: `review-c2-unknown-${sample}`,
+      });
+      unknownDurations.push(performance.now() - startedAt);
+
+      startedAt = performance.now();
+      await service.beginRecovery({
+        identifier: { kind: "email", value: "owner@example.test" },
+        throttleKey: `review-c2-known-${sample}`,
+      });
+      knownDurations.push(performance.now() - startedAt);
+    }
+
+    const median = (samples: readonly number[]): number => {
+      const ordered = [...samples].sort((left, right) => left - right);
+      return ordered[Math.floor(ordered.length / 2)]!;
+    };
+    const knownMedian = median(knownDurations);
+    const unknownMedian = median(unknownDurations);
+
+    expect(knownMedian).toBeGreaterThanOrEqual(225);
+    expect(unknownMedian).toBeGreaterThanOrEqual(225);
+    expect(Math.abs(knownMedian - unknownMedian)).toBeLessThan(40);
+  }, 10_000);
 });

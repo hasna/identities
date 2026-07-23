@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mintApiKey } from "@hasna/contracts/auth";
 import { IdentityStore, type IdentityStoreFile, type StorageBackend, type StorageSnapshot } from "../storage.js";
+import type { AuthSession } from "../sdk/client.js";
 import { createFetchHandler } from "./serve.js";
 import type { CloudIdentityStore } from "../pg-store.js";
 
@@ -81,6 +82,22 @@ describe("identities serve", () => {
     expect(res.status).toBe(200);
     const spec = await res.json();
     expect(spec.paths["/v1/identities"]).toBeDefined();
+    expect(spec.components.schemas.AuthSession.properties.accessToken).toMatchObject({
+      type: "string",
+      readOnly: true,
+    });
+    expect(spec.components.schemas.AuthSession.properties.accessToken.writeOnly).toBeUndefined();
+    expect(spec.components.schemas.AuthSession.properties.refreshToken).toMatchObject({
+      type: "string",
+      readOnly: true,
+    });
+    expect(spec.components.schemas.AuthSession.properties.refreshToken.writeOnly).toBeUndefined();
+    expect(spec.components.schemas.RefreshInput.properties.refreshToken.writeOnly).toBe(true);
+    const sdkResponseTokens: Pick<AuthSession, "accessToken" | "refreshToken"> = {
+      accessToken: "test-access-token",
+      refreshToken: "test-refresh-token",
+    };
+    expect(Object.keys(sdkResponseTokens).sort()).toEqual(["accessToken", "refreshToken"]);
   });
 
   test("/v1 requires an API key", async () => {

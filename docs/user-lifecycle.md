@@ -46,10 +46,11 @@ so Unicode and equivalent punycode spellings collide. Usernames accept 3–64 lo
 alphanumeric, dot, underscore, or hyphen characters.
 
 Invite creation is a transactional authority check. The current actor user and
-membership must be active, the access token and persisted membership must both
-hold the configured invite-management scope, the invited role cannot outrank
-the actor, and invited scopes must be a subset of the token, membership, and
-tenant allowlist. Invite consumption rechecks persisted role and scope
+membership must be active with an owner or admin role, the access token and
+persisted membership must both hold the configured invite-management scope,
+the invited role cannot outrank the actor, and invited scopes must be a subset
+of the token, membership, and tenant allowlist. Invite consumption rechecks
+persisted role and scope
 authority while holding the current tenant allowlist row lock. The store
 persists only its authorization input's configured management scope; a caller
 cannot substitute a weaker scope on the invite record. Registration,
@@ -78,7 +79,9 @@ subset of that membership's scopes. Tokens bind `sub`, `tenant`, `session`,
 `scopes`, `iat`, `nbf`, `exp`, and `jti`.
 Session creation and every refresh re-read active user, membership, and tenant
 authority transactionally, intersect family scopes with current grants, and
-revoke a family whose scope intersection is empty.
+revoke a family whose scope intersection is empty. Refresh locks authority rows
+before session-family rows so concurrent grant narrowing cannot issue stale
+scopes or create a lock-order cycle with membership suspension.
 
 ## Refresh rotation and revocation
 
@@ -107,9 +110,14 @@ family scope state on every request.
 
 Verification and recovery tokens are one-time, hashed, expiring records.
 Delivery occurs only through caller-supplied hooks and is dispatched
-asynchronously after durable token creation. Known and unknown recovery
-requests run the same prewarmed dummy-hash work, share normalized
-identifier-plus-client throttling, and return the same accepted response.
+asynchronously after durable token creation and after the accepted response is
+ready, so synchronous hook setup cannot extend the account-dependent response
+path. Known and unknown recovery requests run the same prewarmed dummy-hash work, share normalized
+identifier-plus-client throttling, and return the same accepted response only
+after a 250 ms minimum response floor. The floor is asynchronous, includes
+durable token and throttle completion work, and is bounded by the same
+client-wide admission cap; deployments may tune `recoveryMinimumResponseMs`
+between 100 and 5,000 ms after measuring their database tail latency.
 Successful recovery replaces the password hash and revokes all sessions.
 
 Restore requires the same explicit platform authority as disable/delete and is

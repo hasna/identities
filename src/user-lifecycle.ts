@@ -1231,6 +1231,7 @@ export interface IdentityLifecycleServiceOptions {
   inviteTtlSeconds?: number;
   verificationTtlSeconds?: number;
   recoveryTtlSeconds?: number;
+  recoveryMinimumResponseMs?: number;
   inviteManagementScope?: string;
   platformAuthorityScope?: string;
   platformAuthorityTenantSlugs?: readonly string[];
@@ -1256,6 +1257,7 @@ export class IdentityLifecycleService {
   private readonly inviteTtlSeconds: number;
   private readonly verificationTtlSeconds: number;
   private readonly recoveryTtlSeconds: number;
+  private readonly recoveryMinimumResponseMs: number;
   private readonly inviteManagementScope: string;
   private readonly platformAuthorityScope: string;
   private readonly platformAuthorityTenantSlugs: string[];
@@ -1303,6 +1305,12 @@ export class IdentityLifecycleService {
       "recoveryTtlSeconds",
       60,
       86_400,
+    );
+    this.recoveryMinimumResponseMs = boundedInteger(
+      options.recoveryMinimumResponseMs ?? 250,
+      "recoveryMinimumResponseMs",
+      100,
+      5_000,
     );
     this.inviteManagementScope = requiredText(
       options.inviteManagementScope ?? DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE,
@@ -1726,6 +1734,7 @@ export class IdentityLifecycleService {
     const normalized = normalizeLoginIdentifier(input.identifier);
     const now = this.now();
     const throttleClient = requiredText(input.throttleKey ?? "default", "throttleKey", 512);
+    const responseStartedAt = performance.now();
     const attemptKeys: IdentityAuthAttemptKeys = {
       failureKeyHash: hashSecret(JSON.stringify([
         "identity-recovery-failure-v1",
@@ -1744,10 +1753,11 @@ export class IdentityLifecycleService {
     ) {
       throw lifecycleError("invalid_configuration");
     }
-    if (!(await this.store.reserveAuthAttempt(attemptKeys, now, this.loginThrottle))) {
-      return { accepted: true };
-    }
+    let attemptReserved = false;
+    let recoveryDelivery: (() => void) | undefined;
     try {
+      attemptReserved = await this.store.reserveAuthAttempt(attemptKeys, now, this.loginThrottle);
+      if (!attemptReserved) return { accepted: true };
       const dummyHash = await this.passwordHasher.dummyHash();
       const [candidate] = await Promise.all([
         this.store.findLoginCandidate(normalized.kind, normalized.value),
@@ -1766,18 +1776,25 @@ export class IdentityLifecycleService {
       };
       await this.store.createOneTimeToken(record);
       if (this.hooks.deliverRecovery !== undefined) {
-        void Promise.resolve().then(() =>
-          this.hooks.deliverRecovery?.({
+        recoveryDelivery = () => {
+          void Promise.resolve(this.hooks.deliverRecovery?.({
             userId: candidate.user.id,
             identifier: { kind: normalized.kind, value: normalized.value },
             token,
             expiresAt: record.expiresAt,
-          }),
-        ).catch(() => undefined);
+          })).catch(() => undefined);
+        };
       }
       return { accepted: true };
     } finally {
-      await this.store.completeAuthAttempt(attemptKeys, this.now(), "failure", this.loginThrottle);
+      try {
+        if (attemptReserved) {
+          await this.store.completeAuthAttempt(attemptKeys, this.now(), "failure", this.loginThrottle);
+        }
+      } finally {
+        await waitForMinimumDuration(responseStartedAt, this.recoveryMinimumResponseMs);
+        if (recoveryDelivery !== undefined) setTimeout(recoveryDelivery, 0);
+      }
     }
   }
 
@@ -2467,6 +2484,12 @@ function boundedInteger(
     );
   }
   return value;
+}
+
+async function waitForMinimumDuration(startedAt: number, minimumMs: number): Promise<void> {
+  const remainingMs = minimumMs - (performance.now() - startedAt);
+  if (remainingMs <= 0) return;
+  await new Promise<void>((resolve) => setTimeout(resolve, Math.ceil(remainingMs)));
 }
 
 function requiredText(value: unknown, label: string, maximum = 1_024): string {

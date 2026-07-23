@@ -800,6 +800,7 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
         actor === null ||
         actor.user_status !== "active" ||
         actor.membership_status !== "active" ||
+        (actor.role !== "owner" && actor.role !== "admin") ||
         authorization === undefined ||
         !authorization.actorTokenScopes.includes(authorization.inviteManagementScope) ||
         !parseScopes(actor.scopes).includes(authorization.inviteManagementScope) ||
@@ -876,6 +877,35 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
     now: Date;
   }): Promise<RefreshRotationResult> {
     return this.client.transaction(async (tx) => {
+      const reference = await tx.get<{ user_id: string; tenant_id: string }>(
+        `SELECT f.user_id, f.tenant_id
+         FROM ${IDENTITY_REFRESH_TOKENS_TABLE} r
+         JOIN ${IDENTITY_SESSION_FAMILIES_TABLE} f ON f.id = r.family_id
+         WHERE r.token_hash = $1`,
+        [input.currentTokenHash],
+      );
+      if (reference === null) return { kind: "invalid" };
+      const context = await tx.get<SessionContextRow>(
+        `SELECT
+           u.*,
+           t.id AS tenant_id,
+           t.slug AS tenant_slug,
+           t.name AS tenant_name,
+           t.allowed_scopes AS tenant_allowed_scopes,
+           t.created_at AS tenant_created_at,
+           m.id AS membership_id,
+           m.role AS membership_role,
+           m.scopes AS membership_scopes,
+           m.status AS membership_status,
+           m.created_at AS membership_created_at
+         FROM ${IDENTITY_USERS_TABLE} u
+         JOIN ${IDENTITY_MEMBERSHIPS_TABLE} m
+           ON m.user_id = u.id AND m.tenant_id = $2
+         JOIN ${IDENTITY_TENANTS_TABLE} t ON t.id = m.tenant_id
+         WHERE u.id = $1
+         FOR UPDATE OF u, m, t`,
+        [reference.user_id, reference.tenant_id],
+      );
       const row = await tx.get<RefreshFamilyRow>(
         `SELECT
            r.id AS refresh_id,
@@ -915,26 +945,6 @@ export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
       ) {
         return { kind: "invalid" };
       }
-      const context = await tx.get<SessionContextRow>(
-        `SELECT
-           u.*,
-           t.id AS tenant_id,
-           t.slug AS tenant_slug,
-           t.name AS tenant_name,
-           t.allowed_scopes AS tenant_allowed_scopes,
-           t.created_at AS tenant_created_at,
-           m.id AS membership_id,
-           m.role AS membership_role,
-           m.scopes AS membership_scopes,
-           m.status AS membership_status,
-           m.created_at AS membership_created_at
-         FROM ${IDENTITY_USERS_TABLE} u
-         JOIN ${IDENTITY_MEMBERSHIPS_TABLE} m
-           ON m.user_id = u.id AND m.tenant_id = $2
-         JOIN ${IDENTITY_TENANTS_TABLE} t ON t.id = m.tenant_id
-         WHERE u.id = $1`,
-        [row.user_id, row.tenant_id],
-      );
       const currentScopes =
         context === null
           ? []

@@ -713,4 +713,157 @@ describeLive("PgIdentityLifecycleStore live Postgres", () => {
       ],
     );
   });
+
+  test("matches in-memory invite role authority when a member holds the management scope", async () => {
+    const live = service("invite");
+    const ownerTenant = await client.one<{ id: string }>(
+      "SELECT id FROM identity_tenants WHERE slug = 'infinity-pg'",
+    );
+    await client.execute(
+      `UPDATE identity_memberships
+       SET scopes = scopes || $2::jsonb
+       WHERE tenant_id = $1 AND role = 'owner'`,
+      [ownerTenant.id, JSON.stringify([DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE])],
+    );
+    const owner = await live.service.login({
+      identifier: { kind: "email", value: "owner@pg.example.test" },
+      password: "correct horse battery staple",
+      tenantId: ownerTenant.id,
+      throttleKey: "review-c2-role-owner",
+    });
+    const memberInvite = await live.service.createInvite({
+      actorAccessToken: owner.accessToken,
+      tenantId: ownerTenant.id,
+      identifier: { kind: "email", value: "pg-review-c2-role-member@example.test" },
+      role: "member",
+      scopes: ["runs:read", DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE],
+    });
+    const member = await live.service.signup({
+      identifier: { kind: "email", value: "pg-review-c2-role-member@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "PG Review C2 Role Member",
+      inviteToken: memberInvite.token,
+    });
+
+    await expect(live.service.createInvite({
+      actorAccessToken: member.accessToken,
+      tenantId: ownerTenant.id,
+      role: "member",
+      scopes: ["runs:read"],
+    })).rejects.toMatchObject({ reason: "forbidden" });
+  });
+
+  test("locks refresh authority rows until a concurrent membership narrowing commits", async () => {
+    const live = service("invite");
+    const ownerTenant = await client.one<{ id: string }>(
+      "SELECT id FROM identity_tenants WHERE slug = 'infinity-pg'",
+    );
+    const owner = await live.service.login({
+      identifier: { kind: "email", value: "owner@pg.example.test" },
+      password: "correct horse battery staple",
+      tenantId: ownerTenant.id,
+      throttleKey: "review-c2-refresh-owner",
+    });
+    const memberInvite = await live.service.createInvite({
+      actorAccessToken: owner.accessToken,
+      tenantId: ownerTenant.id,
+      identifier: { kind: "email", value: "pg-review-c2-refresh@example.test" },
+      role: "member",
+      scopes: ["runs:read", "runs:write"],
+    });
+    const member = await live.service.signup({
+      identifier: { kind: "email", value: "pg-review-c2-refresh@example.test" },
+      password: "a sufficiently strong password",
+      displayName: "PG Review C2 Refresh",
+      inviteToken: memberInvite.token,
+    });
+
+    const blocker = await client.pool.connect();
+    let transactionOpen = false;
+    let refreshResolved = false;
+    let observedLockWait = false;
+    try {
+      await blocker.query("BEGIN");
+      transactionOpen = true;
+      await blocker.query(
+        `UPDATE identity_memberships
+         SET scopes = '["runs:read"]'::jsonb
+         WHERE tenant_id = $1 AND user_id = $2`,
+        [ownerTenant.id, member.user.id],
+      );
+      const refreshOutcome = live.service.refresh({ refreshToken: member.refreshToken }).then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+      void refreshOutcome.then(() => {
+        refreshResolved = true;
+      });
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const state = await client.one<{ waiting: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1
+             FROM pg_stat_activity
+             WHERE datname = current_database()
+               AND pid <> pg_backend_pid()
+               AND wait_event_type = 'Lock'
+               AND query LIKE '%FROM identity_users%'
+           ) AS waiting`,
+        );
+        if (state.waiting) {
+          observedLockWait = true;
+          break;
+        }
+        if (refreshResolved) break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      }
+      await blocker.query(
+        `SELECT id
+         FROM identity_session_families
+         WHERE user_id = $1 AND tenant_id = $2
+         FOR UPDATE`,
+        [member.user.id, ownerTenant.id],
+      );
+      await blocker.query("COMMIT");
+      transactionOpen = false;
+
+      const outcome = await refreshOutcome;
+      expect("error" in outcome ? outcome.error : undefined).toBeUndefined();
+      expect("value" in outcome ? outcome.value.scopes : undefined).toEqual(["runs:read"]);
+    } finally {
+      if (transactionOpen) await blocker.query("ROLLBACK");
+      blocker.release();
+    }
+    expect(observedLockWait).toBe(true);
+  }, 15_000);
+
+  test("keeps live known and unknown recovery distributions behind the response floor", async () => {
+    const live = service("open");
+    const knownDurations: number[] = [];
+    const unknownDurations: number[] = [];
+    for (let sample = 0; sample < 4; sample += 1) {
+      let startedAt = performance.now();
+      await live.service.beginRecovery({
+        identifier: { kind: "email", value: `pg-unknown-c2-${sample}@example.test` },
+        throttleKey: `pg-review-c2-unknown-${sample}`,
+      });
+      unknownDurations.push(performance.now() - startedAt);
+
+      startedAt = performance.now();
+      await live.service.beginRecovery({
+        identifier: { kind: "email", value: "owner@pg.example.test" },
+        throttleKey: `pg-review-c2-known-${sample}`,
+      });
+      knownDurations.push(performance.now() - startedAt);
+    }
+    const median = (samples: readonly number[]): number => {
+      const ordered = [...samples].sort((left, right) => left - right);
+      return ordered[Math.floor(ordered.length / 2)]!;
+    };
+    const knownMedian = median(knownDurations);
+    const unknownMedian = median(unknownDurations);
+
+    expect(knownMedian).toBeGreaterThanOrEqual(225);
+    expect(unknownMedian).toBeGreaterThanOrEqual(225);
+    expect(Math.abs(knownMedian - unknownMedian)).toBeLessThan(100);
+  }, 15_000);
 });

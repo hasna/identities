@@ -238,7 +238,9 @@ soft-delete, verification, and recovery.
 Invite authority, tenant scope allowlists, role hierarchy, membership
 suspension, session scope reduction, and platform-global user state are
 validated transactionally. Login and recovery use bounded pre-admission
-throttles with a client-wide concurrency cap across identifiers. Invite
+throttles with a client-wide concurrency cap across identifiers; recovery
+responses also use a bounded minimum-duration floor so durable token work does
+not expose whether an identifier exists. Invite
 registration and its initial session commit atomically against the locked
 tenant allowlist, email domains use UTS-46/IDNA canonicalization, and
 access-token verification observes current user, membership, family, and JTI
