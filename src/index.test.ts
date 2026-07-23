@@ -977,6 +977,73 @@ describe("open-identities", () => {
     expect(configsExport.sources[3]).toMatchObject({ layer: "tool", merge: "append", order: 200 });
   });
 
+  test("canonical policy capability-gates durable roots without provider mechanics", () => {
+    const exported = createGlobalAgentInstructionSourceExport({ providers: ["generic"] });
+    const canonical = exported.sources.find((source) => source.id === "hasna-global-coding-agent-system-prompt");
+
+    expect(canonical?.content).toContain("the owning coordinator creates or reuses one durable execution root supported by the active runtime");
+    expect(canonical?.content).toContain("links it to the one authoritative Todos root");
+    expect(canonical?.content).toContain("A runtime without such a native primitive must not invent one; Todos remains authoritative");
+    expect(canonical?.content).toContain("Recovery reuses stable identifiers");
+    expect(canonical?.content).not.toContain("runtime-native root");
+    expect(canonical?.content).not.toContain("native Codewith goal plan");
+    expect(canonical?.content).not.toContain("Codewith");
+    expect(canonical?.content).toContain("Delegated workers inherit explicit scope and lineage only");
+    expect(canonical?.content).toContain("They do not create competing root plans or duplicate Todos tasks unless explicitly assigned orchestration ownership");
+  });
+
+  test("exports coordinator non-idling semantics in canonical and non-overridable policy", () => {
+    const exported = createGlobalAgentInstructionSourceExport({ providers: ["codewith"] });
+    const canonical = exported.sources.find((source) => source.id === "hasna-global-coding-agent-system-prompt");
+    const nonOverridable = exported.sources.find((source) => source.id === "hasna-global-coding-agent-non-overridable-rules");
+
+    for (const source of [canonical, nonOverridable]) {
+      expect(source?.content).toContain("coordinators advance every safe, ready, non-overlapping task");
+      expect(source?.content).toContain("do not idle-watch or repeatedly poll workers");
+      expect(source?.content).toContain("They check workers only when completion is signaled, the result becomes a dependency, or bounded intervention is needed");
+      expect(source?.content).toContain("Preserve worker ownership and do not duplicate its assigned scope");
+      expect(source?.content).toContain("If all remaining work is genuinely dependency-blocked, yield and resume on completion rather than manufacture work");
+    }
+    expect(nonOverridable?.content).toContain("10. Coordinator sessions do not write product code directly");
+  });
+
+  test("non-Codewith provider export excludes the native Codewith plan requirement", () => {
+    const exported = createGlobalAgentInstructionSourceExport({ providers: ["claude"] });
+    const policy = exported.sources.map((source) => source.content ?? "").join("\n");
+
+    expect(exported.sources.some((source) => source.id === "hasna-claude-global-agent-overlay")).toBe(true);
+    expect(exported.sources.some((source) => source.id === "hasna-codewith-global-agent-overlay")).toBe(false);
+    expect(policy).not.toContain("create or reuse exactly one native Codewith goal plan");
+  });
+
+  test("Codewith export contains exactly one native plan overlay and preserves policy boundaries", () => {
+    const exported = createGlobalAgentInstructionSourceExport({ providers: ["codewith"] });
+    const overlays = exported.sources.filter((source) => source.id === "hasna-codewith-global-agent-overlay");
+    const overlay = overlays[0];
+    const policy = exported.sources.map((source) => source.content ?? "").join("\n");
+
+    expect(overlays).toHaveLength(1);
+    expect(overlay?.content).toContain("For materially multi-step owner work, create or reuse exactly one native Codewith goal plan and link it to the one authoritative Todos root");
+    expect(overlay?.content).toContain("simple one-step answers and lookups are exempt");
+    expect(overlay?.content).toContain("Coherent single-slice work may use one native goal");
+    expect(overlay?.content).toContain("Recovery reuses the stable goal-plan and Todos identifiers");
+    expect(overlay?.content).toContain("add explicit adversarial verification goal nodes or steps");
+    expect(overlay?.content).toContain("Codewith native /loop");
+    expect(policy).toContain("Do not set Codewith goal, token, or goal-plan budgets unless the user explicitly asks for budgets");
+    expect(exported.sources.map((source) => source.id)).toEqual([
+      "hasna-global-coding-agent-non-overridable-rules",
+      "hasna-global-coding-agent-system-prompt",
+      "hasna-agent-operating-rules",
+      "hasna-codewith-global-agent-overlay",
+    ]);
+    expect(overlay?.ruleIds).toEqual([
+      "provider:codewith:native-goals",
+      "provider:codewith:goal-plan-adversarial-steps",
+      "provider:codewith:native-loops",
+      "provider:codewith:no-tmux-fallback",
+    ]);
+  });
+
   test("CLI exposes instruction source list, paths, show, set, validate, export, import, and sources", async () => {
     const dir = await mkdtemp(join(tmpdir(), "open-identities-instructions-cli-"));
     const storePath = join(dir, "identities.json");
