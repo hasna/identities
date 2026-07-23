@@ -14,10 +14,15 @@ import { runIdentitiesMigrations } from "./pg-store.js";
 import {
   Argon2idIdentityPasswordHasher,
   DEFAULT_IDENTITY_INVITE_MANAGEMENT_SCOPE,
+  InMemoryIdentityLifecycleStore,
   IdentityLifecycleError,
   IdentityLifecycleService,
   identityLifecycleMigrations,
+  type IdentityLifecycleSnapshot,
   type IdentityInviteRecord,
+  type IdentityMembershipRole,
+  type IdentityMembershipStatus,
+  type IdentityUserStatus,
 } from "./user-lifecycle.js";
 
 const databaseUrl = process.env["TEST_DATABASE_URL"];
@@ -25,6 +30,175 @@ const describeLive = databaseUrl === undefined ? describe.skip : describe;
 const ISSUER = "https://identity-pg.example.test";
 
 type SigningKey = CryptoKey | KeyObject;
+
+type AdministrationParityCase = {
+  name: string;
+  actorUserStatus?: IdentityUserStatus | "missing";
+  tenantState?: "present" | "missing";
+  actorRole?: IdentityMembershipRole | "missing";
+  actorMembershipStatus?: IdentityMembershipStatus;
+  actorTenant?: "requested" | "other";
+  targetUserState?: "present" | "missing";
+  targetRole?: IdentityMembershipRole | "missing";
+  targetMembershipStatus?: IdentityMembershipStatus;
+  targetTenant?: "requested" | "other";
+  expected: boolean;
+};
+
+const administrationParityCases: readonly AdministrationParityCase[] = [
+  { name: "active owner administers active member", expected: true },
+  { name: "active admin administers active member", actorRole: "admin", expected: true },
+  { name: "active owner administers active admin", targetRole: "admin", expected: true },
+  {
+    name: "suspended target membership is not administrable",
+    targetMembershipStatus: "suspended",
+    expected: false,
+  },
+  { name: "disabled actor user cannot administer", actorUserStatus: "disabled", expected: false },
+  { name: "deleted actor user cannot administer", actorUserStatus: "deleted", expected: false },
+  {
+    name: "suspended actor membership cannot administer",
+    actorMembershipStatus: "suspended",
+    expected: false,
+  },
+  { name: "member role cannot administer", actorRole: "member", expected: false },
+  {
+    name: "admin cannot administer another admin",
+    actorRole: "admin",
+    targetRole: "admin",
+    expected: false,
+  },
+  { name: "owner cannot administer another owner", targetRole: "owner", expected: false },
+  { name: "missing requested tenant is denied", tenantState: "missing", expected: false },
+  { name: "missing actor user is denied", actorUserStatus: "missing", expected: false },
+  { name: "missing actor membership is denied", actorRole: "missing", expected: false },
+  { name: "missing target user is denied", targetUserState: "missing", expected: false },
+  { name: "missing target membership is denied", targetRole: "missing", expected: false },
+  { name: "cross-tenant actor membership is denied", actorTenant: "other", expected: false },
+  { name: "cross-tenant target membership is denied", targetTenant: "other", expected: false },
+];
+
+function administrationParityState(
+  index: number,
+  scenario: AdministrationParityCase,
+): {
+  actorUserId: string;
+  targetUserId: string;
+  tenantId: string;
+  snapshot: IdentityLifecycleSnapshot;
+} {
+  const suffix = index.toString().padStart(2, "0");
+  const actorUserId = `usr_review_d2_actor_${suffix}`;
+  const targetUserId = `usr_review_d2_target_${suffix}`;
+  const tenantId = `ten_review_d2_requested_${suffix}`;
+  const otherTenantId = `ten_review_d2_other_${suffix}`;
+  const createdAt = "2026-07-23T00:00:00.000Z";
+  const actorUserStatus = scenario.actorUserStatus ?? "active";
+  const tenantState = scenario.tenantState ?? "present";
+  const actorRole = scenario.actorRole ?? "owner";
+  const actorMembershipStatus = scenario.actorMembershipStatus ?? "active";
+  const actorTenant = scenario.actorTenant ?? "requested";
+  const targetUserState = scenario.targetUserState ?? "present";
+  const targetRole = scenario.targetRole ?? "member";
+  const targetMembershipStatus = scenario.targetMembershipStatus ?? "active";
+  const targetTenant = scenario.targetTenant ?? "requested";
+  const needsOtherTenant =
+    actorTenant === "other" || targetTenant === "other";
+  const actorMembershipTenantId = actorTenant === "requested" ? tenantId : otherTenantId;
+  const targetMembershipTenantId = targetTenant === "requested" ? tenantId : otherTenantId;
+  const snapshot: IdentityLifecycleSnapshot = {
+    users: [
+      ...(actorUserStatus === "missing"
+        ? []
+        : [{
+            id: actorUserId,
+            status: actorUserStatus,
+            displayName: `Parity actor ${suffix}`,
+            createdAt,
+            updatedAt: createdAt,
+          }]),
+      ...(targetUserState === "present"
+        ? [{
+            id: targetUserId,
+            status: "active" as const,
+            displayName: `Parity target ${suffix}`,
+            createdAt,
+            updatedAt: createdAt,
+          }]
+        : []),
+    ],
+    tenants: [
+      ...(tenantState === "present"
+        ? [{
+            id: tenantId,
+            slug: `review-d2-requested-${suffix}`,
+            name: `Parity requested tenant ${suffix}`,
+            allowedScopes: ["runs:read"],
+            createdAt,
+          }]
+        : []),
+      ...(needsOtherTenant
+        ? [{
+            id: otherTenantId,
+            slug: `review-d2-other-${suffix}`,
+            name: `Parity other tenant ${suffix}`,
+            allowedScopes: ["runs:read"],
+            createdAt,
+          }]
+        : []),
+    ],
+    memberships: [
+      ...(actorRole === "missing"
+        ? []
+        : [{
+            id: `mem_review_d2_actor_${suffix}`,
+            tenantId: actorMembershipTenantId,
+            userId: actorUserId,
+            role: actorRole,
+            scopes: ["runs:read"],
+            status: actorMembershipStatus,
+            createdAt,
+          }]),
+      ...(targetRole === "missing"
+        ? []
+        : [{
+            id: `mem_review_d2_target_${suffix}`,
+            tenantId: targetMembershipTenantId,
+            userId: targetUserId,
+            role: targetRole,
+            scopes: ["runs:read"],
+            status: targetMembershipStatus,
+            createdAt,
+          }]),
+    ],
+    loginIdentifiers: [],
+    credentials: [],
+    invites: [],
+    sessionFamilies: [],
+    refreshTokens: [],
+    oneTimeTokens: [],
+    loginThrottles: [],
+    jtiRevocations: [],
+    issuedAccessTokens: [],
+  };
+  return { actorUserId, targetUserId, tenantId, snapshot };
+}
+
+describe("InMemoryIdentityLifecycleStore canAdminister active-state contract", () => {
+  for (const [index, scenario] of administrationParityCases.entries()) {
+    test(scenario.name, async () => {
+      const fixture = administrationParityState(index, scenario);
+      const store = new InMemoryIdentityLifecycleStore(fixture.snapshot);
+      expect(
+        await store.canAdminister(
+          fixture.actorUserId,
+          fixture.tenantId,
+          fixture.targetUserId,
+        ),
+      ).toBe(scenario.expected);
+    });
+  }
+});
 
 describeLive("PgIdentityLifecycleStore live Postgres", () => {
   let client: PoolQueryClient;
@@ -866,4 +1040,106 @@ describeLive("PgIdentityLifecycleStore live Postgres", () => {
     expect(unknownMedian).toBeGreaterThanOrEqual(225);
     expect(Math.abs(knownMedian - unknownMedian)).toBeLessThan(100);
   }, 15_000);
+
+  test("matches the in-memory canAdminister active-state corpus", async () => {
+    const store = new PgIdentityLifecycleStore(client);
+    await client.execute(
+      "DELETE FROM identity_memberships WHERE id LIKE 'mem_review_d2_%'",
+    );
+    await client.execute(
+      "DELETE FROM identity_tenants WHERE id LIKE 'ten_review_d2_%'",
+    );
+    await client.execute(
+      "DELETE FROM identity_users WHERE id LIKE 'usr_review_d2_%'",
+    );
+    try {
+      for (const [index, scenario] of administrationParityCases.entries()) {
+        const fixture = administrationParityState(index, scenario);
+        for (const user of fixture.snapshot.users) {
+          await client.execute(
+            `INSERT INTO identity_users
+               (id, status, display_name, created_at, updated_at, disabled_at, deleted_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+              user.id,
+              user.status,
+              user.displayName,
+              user.createdAt,
+              user.updatedAt,
+              user.disabledAt ?? null,
+              user.deletedAt ?? null,
+            ],
+          );
+        }
+        for (const tenant of fixture.snapshot.tenants) {
+          await client.execute(
+            `INSERT INTO identity_tenants
+               (id, slug, name, allowed_scopes, created_at)
+             VALUES ($1, $2, $3, $4::jsonb, $5)`,
+            [
+              tenant.id,
+              tenant.slug,
+              tenant.name,
+              JSON.stringify(tenant.allowedScopes ?? []),
+              tenant.createdAt,
+            ],
+          );
+        }
+        const persistedUserIds = new Set(fixture.snapshot.users.map((user) => user.id));
+        const persistedTenantIds = new Set(fixture.snapshot.tenants.map((tenant) => tenant.id));
+        // PostgreSQL's foreign keys make orphaned memberships unrepresentable.
+        for (const membership of fixture.snapshot.memberships.filter(
+          (candidate) =>
+            persistedUserIds.has(candidate.userId) &&
+            persistedTenantIds.has(candidate.tenantId),
+        )) {
+          await client.execute(
+            `INSERT INTO identity_memberships
+               (id, tenant_id, user_id, role, scopes, status, created_at)
+             VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+            [
+              membership.id,
+              membership.tenantId,
+              membership.userId,
+              membership.role,
+              JSON.stringify(membership.scopes),
+              membership.status ?? "active",
+              membership.createdAt,
+            ],
+          );
+        }
+
+        const memoryStore = new InMemoryIdentityLifecycleStore(fixture.snapshot);
+        const memoryResult = await memoryStore.canAdminister(
+          fixture.actorUserId,
+          fixture.tenantId,
+          fixture.targetUserId,
+        );
+        const postgresResult = await store.canAdminister(
+          fixture.actorUserId,
+          fixture.tenantId,
+          fixture.targetUserId,
+        );
+        expect({
+          scenario: scenario.name,
+          memoryResult,
+          postgresResult,
+        }).toEqual({
+          scenario: scenario.name,
+          memoryResult: scenario.expected,
+          postgresResult: scenario.expected,
+        });
+      }
+    } finally {
+      await client.execute(
+        "DELETE FROM identity_memberships WHERE id LIKE 'mem_review_d2_%'",
+      );
+      await client.execute(
+        "DELETE FROM identity_tenants WHERE id LIKE 'ten_review_d2_%'",
+      );
+      await client.execute(
+        "DELETE FROM identity_users WHERE id LIKE 'usr_review_d2_%'",
+      );
+    }
+  });
 });

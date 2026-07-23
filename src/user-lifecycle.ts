@@ -1075,6 +1075,10 @@ export class InMemoryIdentityLifecycleStore implements IdentityLifecycleStore {
 
   async canAdminister(actorUserId: string, tenantId: string, targetUserId: string): Promise<boolean> {
     return this.exclusive(() => {
+      const actorUser = this.state.users.find(
+        (user) => user.id === actorUserId && user.status === "active",
+      );
+      const tenant = this.state.tenants.find((candidate) => candidate.id === tenantId);
       const actor = this.state.memberships.find(
         (membership) =>
           membership.userId === actorUserId &&
@@ -1083,9 +1087,20 @@ export class InMemoryIdentityLifecycleStore implements IdentityLifecycleStore {
           (membership.role === "owner" || membership.role === "admin"),
       );
       const target = this.state.memberships.find(
-        (membership) => membership.userId === targetUserId && membership.tenantId === tenantId,
+        (membership) =>
+          membership.userId === targetUserId &&
+          membership.tenantId === tenantId &&
+          membershipStatus(membership) === "active",
       );
-      return actor !== undefined && target !== undefined && roleCanManage(actor.role, target.role);
+      const targetUser = this.state.users.find((user) => user.id === targetUserId);
+      return (
+        actorUser !== undefined &&
+        tenant !== undefined &&
+        actor !== undefined &&
+        target !== undefined &&
+        targetUser !== undefined &&
+        roleCanManage(actor.role, target.role)
+      );
     });
   }
 
