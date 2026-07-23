@@ -133,6 +133,27 @@ describe("canonical agent identity contract v1", () => {
     expect("identity" in byAlias).toBe(false);
   });
 
+  test("fails duplicate authority IDs closed independently of input order", () => {
+    const first = canonicalAgent("oid_duplicate", "first");
+    const second = canonicalAgent("oid_duplicate", "second");
+
+    for (const identities of [[first, second], [second, first]]) {
+      const resolution = resolveCanonicalIdentity(identities, {
+        kind: "identity_id",
+        identity_id: "oid_duplicate",
+      });
+
+      expect(resolution).toEqual(expect.objectContaining({
+        status: "ambiguous",
+        code: IDENTITY_ALIAS_AMBIGUOUS,
+        matched_by: "identity_id",
+        candidate_identity_ids: ["oid_duplicate"],
+        trust: "denied",
+      }));
+      expect("identity" in resolution).toBe(false);
+    }
+  });
+
   test("adds aliases immutably while rejecting collisions and stale concurrent revisions", () => {
     const first = canonicalAgent("oid_first", "first");
     const second = canonicalAgent("oid_second", "second");
@@ -304,6 +325,96 @@ describe("canonical agent identity contract v1", () => {
     expect(report.changes[0]?.mapping_transitions).toEqual([
       expect.objectContaining({ action: "retire", previous_revision: 2, current_revision: 3 }),
     ]);
+  });
+
+  test("validates imported source revision continuity and lifecycle actions", () => {
+    const source = {
+      source_authority: "todos",
+      source_tenant_id: "tenant-acme",
+      source_namespace: "agents",
+      source_entity_type: "agent",
+      source_record_id: "imported-history-agent",
+    };
+    const lineageKey = sourceLineageKey(source);
+    const original = createCanonicalAgentIdentity({
+      identity_id: "oid_imported_original",
+      canonical_handle: { ...scope, handle: "imported-original" },
+      source_mappings: [{
+        source,
+        lineage_key: lineageKey,
+        identity_id: "oid_imported_original",
+        mapping_kind: "imported",
+        status: "active",
+        revision: 1,
+        lifecycle_action: "create",
+        evidence: {},
+      }],
+    });
+    const gap = createCanonicalAgentIdentity({
+      identity_id: "oid_imported_corrected",
+      canonical_handle: { ...scope, handle: "imported-corrected" },
+      source_mappings: [{
+        source,
+        lineage_key: lineageKey,
+        identity_id: "oid_imported_corrected",
+        mapping_kind: "authoritative",
+        status: "active",
+        revision: 3,
+        lifecycle_action: "correct",
+        evidence: {},
+      }],
+    });
+    const invalidTransition = createCanonicalAgentIdentity({
+      identity_id: "oid_imported_corrected",
+      canonical_handle: { ...scope, handle: "imported-corrected" },
+      source_mappings: [{
+        source,
+        lineage_key: lineageKey,
+        identity_id: "oid_imported_corrected",
+        mapping_kind: "authoritative",
+        status: "active",
+        revision: 2,
+        lifecycle_action: "retire",
+        evidence: {},
+      }],
+    });
+    const corrected = createCanonicalAgentIdentity({
+      identity_id: "oid_imported_corrected",
+      canonical_handle: { ...scope, handle: "imported-corrected" },
+      source_mappings: [{
+        source,
+        lineage_key: lineageKey,
+        identity_id: "oid_imported_corrected",
+        mapping_kind: "authoritative",
+        status: "active",
+        revision: 2,
+        lifecycle_action: "correct",
+        evidence: {},
+      }],
+    });
+
+    expect(() => createIdentityDirectory([original, gap])).toThrow(/revision continuity/);
+    expect(() => createIdentityDirectory([original, invalidTransition])).toThrow(/lifecycle action/);
+    expect(() => resolveCanonicalIdentity([original, gap], {
+      kind: "source",
+      source,
+    })).toThrow(/revision continuity/);
+    expect(() => resolveCanonicalIdentity([original, invalidTransition], {
+      kind: "source",
+      source,
+    })).toThrow(/lifecycle action/);
+
+    for (const identities of [[original, corrected], [corrected, original]]) {
+      const directory = createIdentityDirectory(identities);
+      expect(resolveCanonicalIdentity(directory.identities, {
+        kind: "source",
+        source,
+      })).toMatchObject({
+        status: "resolved",
+        identity_id: "oid_imported_corrected",
+        trust: "authoritative",
+      });
+    }
   });
 
   test("quarantines similarity-only convergence candidates", () => {

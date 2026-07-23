@@ -354,6 +354,24 @@ export class IdentityAliasAmbiguousError extends IdentityContractError {
   }
 }
 
+class IdentitySourceMappingHistoryError extends IdentityContractError {
+  readonly code: "source_mapping_revision_continuity" | "source_mapping_lifecycle_transition";
+  readonly lineage_key: string;
+  readonly identity_id: string;
+
+  constructor(
+    code: "source_mapping_revision_continuity" | "source_mapping_lifecycle_transition",
+    message: string,
+    mapping: IdentitySourceMappingV1,
+  ) {
+    super(message);
+    this.name = "IdentitySourceMappingHistoryError";
+    this.code = code;
+    this.lineage_key = mapping.lineage_key;
+    this.identity_id = mapping.identity_id;
+  }
+}
+
 export function createCanonicalAgentIdentity(
   input: CreateCanonicalAgentIdentityInputV1,
 ): CanonicalAgentIdentityV1 {
@@ -383,6 +401,7 @@ export function createCanonicalAgentIdentity(
     }
   }
   identity = { ...identity, source_mappings: sortSourceMappingHistory(revisions) };
+  validateSourceMappingHistories([identity], false);
   for (const proposal of proposals) {
     identity = appendIdentitySourceMappingRevision([identity], {
       identity_id: identityId,
@@ -453,6 +472,7 @@ export function appendIdentitySourceMappingRevision(
       latest.map((revision) => revision.identity_id),
     );
   }
+  validateSourceMappingHistories(normalizedIdentities, true);
   const previous = latest[0] ?? null;
   const mappingKind = normalizeSourceMappingKind(input.mapping_kind);
   const status = normalizeSourceMappingStatus(input.status ?? "active");
@@ -473,16 +493,11 @@ export function appendIdentitySourceMappingRevision(
     };
   }
 
-  const action: IdentitySourceMappingRevisionActionV1 = !previous
-    ? "create"
-    : status === "retired" && previous.status !== "retired"
-      ? "retire"
-      : mappingKind === "authoritative"
-          && status === "active"
-          && previous.identity_id === identityId
-          && (previous.mapping_kind !== "authoritative" || previous.status !== "active")
-        ? "promote"
-        : "correct";
+  const action = sourceMappingLifecycleAction(previous, {
+    identity_id: identityId,
+    mapping_kind: mappingKind,
+    status,
+  });
   const revision: IdentitySourceMappingV1 = {
     source,
     lineage_key: lineageKey,
@@ -555,6 +570,7 @@ export function createIdentityDirectory(
     }
     seen.add(identity.identity_id);
   }
+  validateSourceMappingHistories(normalized, true);
 
   return {
     contract: IDENTITY_DIRECTORY_CONTRACT_V1,
@@ -610,9 +626,10 @@ export function resolveCanonicalIdentity(
 ): CanonicalIdentityResolutionV1 {
   if (reference.kind === "source") {
     const lineageKey = sourceLineageKey(reference.source);
-    const latest = latestSourceMappingRevisions(identities
+    const history = identities
       .flatMap((identity) => identity.source_mappings)
-      .filter((revision) => revision.lineage_key === lineageKey));
+      .filter((revision) => revision.lineage_key === lineageKey);
+    const latest = latestSourceMappingRevisions(history);
     if (latest.length > 1) {
       return {
         status: "ambiguous",
@@ -622,6 +639,7 @@ export function resolveCanonicalIdentity(
         trust: "denied",
       };
     }
+    validateSourceMappingHistory(history, true);
     const mapping = latest[0];
     if (!mapping) {
       return {
@@ -663,7 +681,7 @@ export function resolveCanonicalIdentity(
     };
   }
 
-  const matches = uniqueByIdentityId(identities.filter((identity) => matchesReference(identity, reference)));
+  const matches = identities.filter((identity) => matchesReference(identity, reference));
   if (matches.length === 0) {
     return {
       status: "not_found",
@@ -678,7 +696,7 @@ export function resolveCanonicalIdentity(
       status: "ambiguous",
       code: IDENTITY_ALIAS_AMBIGUOUS,
       matched_by: reference.kind,
-      candidate_identity_ids: matches.map((identity) => identity.identity_id).sort(),
+      candidate_identity_ids: [...new Set(matches.map((identity) => identity.identity_id))].sort(),
       trust: "denied",
     };
   }
@@ -850,6 +868,7 @@ export function planCanonicalIdentityMigration(
 
     const mappingTransitions: IdentitySourceMappingTransitionV1[] = [];
     let mappingBlocked = false;
+    let mappingBlockReason = "ambiguous source mapping history";
     for (const mapping of binding?.source_mappings ?? []) {
       try {
         const appended = appendIdentitySourceMappingRevision(workingIdentities, {
@@ -865,14 +884,19 @@ export function planCanonicalIdentityMigration(
           current_revision: appended.current_revision.revision,
         });
       } catch (error) {
-        if (!(error instanceof IdentityAliasAmbiguousError)) throw error;
+        if (!(error instanceof IdentityAliasAmbiguousError) && !(error instanceof IdentitySourceMappingHistoryError)) {
+          throw error;
+        }
         issues.push({
           severity: "error",
-          code: IDENTITY_ALIAS_AMBIGUOUS,
+          code: error instanceof IdentityAliasAmbiguousError ? IDENTITY_ALIAS_AMBIGUOUS : error.code,
           message: error.message,
           identity_id: identityId,
           lineage_key: sourceLineageKey(mapping.source),
         });
+        if (error instanceof IdentitySourceMappingHistoryError) {
+          mappingBlockReason = "invalid source mapping history";
+        }
         mappingBlocked = true;
         break;
       }
@@ -882,7 +906,7 @@ export function planCanonicalIdentityMigration(
       changes.push({
         identity_id: identityId,
         action: "blocked",
-        reasons: ["ambiguous source mapping history"],
+        reasons: [mappingBlockReason],
         mapping_transitions: [],
       });
       continue;
@@ -1119,6 +1143,89 @@ function latestSourceMappingRevisions(
   return history.filter((mapping) => mapping.revision === latestRevision);
 }
 
+function sourceMappingLifecycleAction(
+  previous: IdentitySourceMappingV1 | null,
+  current: Pick<IdentitySourceMappingV1, "identity_id" | "mapping_kind" | "status">,
+): IdentitySourceMappingRevisionActionV1 {
+  if (!previous) return "create";
+  if (current.status === "retired" && previous.status !== "retired") return "retire";
+  if (
+    current.mapping_kind === "authoritative"
+    && current.status === "active"
+    && previous.identity_id === current.identity_id
+    && (previous.mapping_kind !== "authoritative" || previous.status !== "active")
+  ) {
+    return "promote";
+  }
+  return "correct";
+}
+
+function validateSourceMappingHistories(
+  identities: readonly CanonicalAgentIdentityV1[],
+  requireComplete: boolean,
+): void {
+  const histories = new Map<string, IdentitySourceMappingV1[]>();
+  for (const identity of identities) {
+    for (const mapping of identity.source_mappings) {
+      const history = histories.get(mapping.lineage_key) ?? [];
+      history.push(mapping);
+      histories.set(mapping.lineage_key, history);
+    }
+  }
+  for (const history of histories.values()) {
+    validateSourceMappingHistory(history, requireComplete);
+  }
+}
+
+function validateSourceMappingHistory(
+  history: readonly IdentitySourceMappingV1[],
+  requireComplete: boolean,
+): void {
+  const sorted = [...history].sort((left, right) => {
+    const revision = left.revision - right.revision;
+    return revision !== 0
+      ? revision
+      : left.identity_id.localeCompare(right.identity_id, "en-US");
+  });
+  let previous: IdentitySourceMappingV1 | null = null;
+  for (const current of sorted) {
+    if (!previous) {
+      if (requireComplete && current.revision !== 1) {
+        throw new IdentitySourceMappingHistoryError(
+          "source_mapping_revision_continuity",
+          `Source mapping revision continuity must start at 1, found ${current.revision}`,
+          current,
+        );
+      }
+      if (current.revision === 1 && current.lifecycle_action !== "create") {
+        throw new IdentitySourceMappingHistoryError(
+          "source_mapping_lifecycle_transition",
+          `Source mapping lifecycle action ${current.lifecycle_action} does not match expected create at revision 1`,
+          current,
+        );
+      }
+      previous = current;
+      continue;
+    }
+    if (current.revision !== previous.revision + 1) {
+      throw new IdentitySourceMappingHistoryError(
+        "source_mapping_revision_continuity",
+        `Source mapping revision continuity expected ${previous.revision + 1}, found ${current.revision}`,
+        current,
+      );
+    }
+    const expectedAction = sourceMappingLifecycleAction(previous, current);
+    if (current.lifecycle_action !== expectedAction) {
+      throw new IdentitySourceMappingHistoryError(
+        "source_mapping_lifecycle_transition",
+        `Source mapping lifecycle action ${current.lifecycle_action} does not match expected ${expectedAction} at revision ${current.revision}`,
+        current,
+      );
+    }
+    previous = current;
+  }
+}
+
 function aliasKey(alias: IdentityAliasV1): string {
   const normalized = normalizeAlias(alias);
   return JSON.stringify([
@@ -1261,20 +1368,22 @@ function findDirectoryCollisions(identities: readonly CanonicalAgentIdentityV1[]
         identity_id: duplicateRevision[0]!.identity_id,
         lineage_key: lineageKey,
       });
+      continue;
+    }
+    try {
+      validateSourceMappingHistory(history, true);
+    } catch (error) {
+      if (!(error instanceof IdentitySourceMappingHistoryError)) throw error;
+      issues.push({
+        severity: "error",
+        code: error.code,
+        message: error.message,
+        identity_id: error.identity_id,
+        lineage_key: error.lineage_key,
+      });
     }
   }
   return issues;
-}
-
-function uniqueByIdentityId(identities: readonly CanonicalAgentIdentityV1[]): CanonicalAgentIdentityV1[] {
-  const seen = new Set<string>();
-  const result: CanonicalAgentIdentityV1[] = [];
-  for (const identity of identities) {
-    if (seen.has(identity.identity_id)) continue;
-    seen.add(identity.identity_id);
-    result.push(identity);
-  }
-  return result;
 }
 
 function dedupeBy<T>(values: readonly T[], keyFor: (value: T) => string): T[] {

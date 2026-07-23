@@ -97,6 +97,10 @@ the prior identity and evidence remain intact. Resolution projects the highest
 unique valid revision; competing rows at that revision fail closed with
 `IDENTITY_ALIAS_AMBIGUOUS` rather than selecting arbitrarily. Retired current
 revisions remain available for historical lookup but are non-authoritative.
+Imported directory histories must be contiguous from revision 1, and each
+stored lifecycle action must match the same transition classifier used when
+appending revisions; invalid histories fail before directory creation or source
+resolution.
 
 Never key convergence by a local ID alone. Handle, contact, or name similarity
 can be represented only with `createIdentityConvergenceCandidate`; the separate
