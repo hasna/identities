@@ -7,14 +7,14 @@
       "dependencies": {
         "@hasna/contracts": "0.4.2",
         "@modelcontextprotocol/sdk": "^1.29.0",
+        "@types/bun": "^1.2.4",
+        "@types/node": "^22.13.4",
+        "@types/pg": "^8.11.10",
         "jose": "6.2.3",
         "pg": "^8.16.3",
         "zod": "^3.24.2",
       },
       "devDependencies": {
-        "@types/bun": "^1.2.4",
-        "@types/node": "^22.13.4",
-        "@types/pg": "^8.11.10",
         "typescript": "^5.7.3",
       },
     },

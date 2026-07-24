@@ -17,6 +17,10 @@
 
 ## Unreleased
 
+- Made exact Git dependencies usable without trusted lifecycle scripts by
+  shipping the TypeScript source, routing Bun and type resolution to source,
+  keeping Node imports on the built distribution, and removing the obsolete
+  install-time data-directory side effect.
 - Added the authoritative Identities-owned end-user lifecycle: relational
   users, tenants, memberships, normalized login identifiers, Argon2id
   credentials, invite/verification/recovery state, hashed rotating refresh
