@@ -66,13 +66,22 @@ const IDENTITIES_STORAGE_MODE_ENV = "HASNA_IDENTITIES_STORAGE_MODE";
 export type StorageTransport = "api" | "local";
 
 /**
+ * Environment variable map accepted by the resolvers below.
+ *
+ * Declared structurally instead of using the Node ambient process-env type so the
+ * published declarations never force `@types/node` on a consumer. `process.env`
+ * is assignable to it.
+ */
+export type EnvironmentVariables = Record<string, string | undefined>;
+
+/**
  * Resolve the cloud HTTP config from the environment.
  * - both vars set   -> returns config (api transport; self_hosted or cloud)
  * - neither set     -> returns null (local file store)
  * - exactly one set -> throws (misconfigured; never silently fall back to local)
  */
 export function resolveCloudHttpConfig(
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvironmentVariables = process.env,
 ): CloudHttpConfig | null {
   const apiUrl = env[IDENTITIES_API_URL_ENV]?.trim();
   const apiKey = env[IDENTITIES_API_KEY_ENV]?.trim();
@@ -102,7 +111,7 @@ export function resolveCloudHttpConfig(
  * `cloud` both mean "route to the HTTPS `/v1` API with a bearer key". Only the
  * server process (src/server) talks to Postgres directly.
  */
-export function resolveStorageTransport(env: NodeJS.ProcessEnv = process.env): StorageTransport {
+export function resolveStorageTransport(env: EnvironmentVariables = process.env): StorageTransport {
   const raw = env[IDENTITIES_STORAGE_MODE_ENV]?.trim().toLowerCase().replace(/-/g, "_");
   if (raw) {
     if (raw === "local") return "local";

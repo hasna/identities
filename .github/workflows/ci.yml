@@ -19,5 +19,7 @@ jobs:
       - run: bun test
       - run: bun run build
       - run: npm pack --dry-run --ignore-scripts
+      - run: bun run verify:shipped-types
+      - run: git diff --exit-code -- types
       - run: bun run verify:package-consumers
 

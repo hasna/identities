@@ -24,12 +24,28 @@ interface PackageExport {
   import?: string;
 }
 
+/**
+ * Compiler flag sets every consumer probe must survive.
+ *
+ * `--strict` alone is not enough: a consumer is free to run stricter flags, and
+ * with the `types` condition pointing at raw source those flags would typecheck
+ * our implementation. Declarations are shipped instead, so the strictest common
+ * flags must stay clean here or the packaging regressed.
+ */
+const strictFlagSets = [
+  ["--strict"],
+  ["--strict", "--exactOptionalPropertyTypes", "--noUncheckedIndexedAccess"],
+] as const;
+
 interface PackageManifest {
   bin: Record<string, string>;
+  dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   exports: Record<string, PackageExport>;
+  peerDependencies?: Record<string, string>;
   scripts?: Record<string, string>;
   trustedDependencies?: string[];
+  version?: string;
 }
 
 interface PackFile {
@@ -47,6 +63,8 @@ interface PackResult {
 }
 
 interface ConsumerOptions {
+  /** Extra consumer dev dependencies, e.g. an older ambient type pin. */
+  devDependencies?: Record<string, string>;
   expectDist: boolean;
   label: string;
   manager: "bun" | "npm";
@@ -79,6 +97,17 @@ try {
       packageSpec: tarball,
       runtime: "node",
     });
+    // A consumer that pins ambient type packages older than the ones this package
+    // develops against must still install. Type packages must never hard-block an
+    // install, so this case fails the moment they come back as peer requirements.
+    await verifyConsumer({
+      devDependencies: { "@types/node": "^18.19.0", "@types/pg": "^8.6.6" },
+      expectDist: true,
+      label: "packed-npm-node-old-ambient-types",
+      manager: "npm",
+      packageSpec: tarball,
+      runtime: "node",
+    });
   }
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
@@ -103,8 +132,17 @@ async function createAndInspectTarball(): Promise<string> {
   for (const entry of Object.values(packageManifest.exports)) {
     assert(entry.bun !== undefined, "every export needs a Bun source target");
     assert(entry.import !== undefined, "every export needs a built Node target");
+    assert(entry.types !== undefined, "every export needs a declaration target");
+    assert(
+      entry.types.endsWith(".d.ts") && !entry.types.startsWith("./src/"),
+      `types condition must point at shipped declarations, not source: ${entry.types}`,
+    );
     assert(packedPaths.has(withoutDotSlash(entry.bun)), `missing packed source export ${entry.bun}`);
     assert(packedPaths.has(withoutDotSlash(entry.import)), `missing packed Node export ${entry.import}`);
+    assert(
+      packedPaths.has(withoutDotSlash(entry.types)),
+      `missing packed declaration export ${entry.types}`,
+    );
   }
 
   for (const target of Object.values(packageManifest.bin)) {
@@ -136,6 +174,7 @@ async function verifyConsumer(options: ConsumerOptions): Promise<void> {
         "@hasna/identities": dependencySpec,
       },
       devDependencies: {
+        ...options.devDependencies,
         typescript: typeScriptVersion,
       },
     }, null, 2)}\n`,
@@ -171,6 +210,43 @@ async function verifyConsumer(options: ConsumerOptions): Promise<void> {
     "installed export surface differs from the source manifest",
   );
 
+  for (const [subpath, entry] of Object.entries(installedManifest.exports)) {
+    assert(entry.types !== undefined, `${subpath} lost its declaration target`);
+    assert(!entry.types.startsWith("./src/"), `${subpath} types condition points at source`);
+    assert(
+      await pathExists(join(installedRoot, entry.types)),
+      `${options.label} is missing installed declarations for ${subpath} (${entry.types})`,
+    );
+  }
+  // Type packages must never be able to block a consumer install, so none of them
+  // may be a peer requirement. `@types/pg` stays an ordinary wide-range dependency
+  // because the shipped `pg-store` declarations reference `pg` types: as a
+  // dependency it is nested on conflict instead of failing resolution.
+  for (const ambient of ["@types/bun", "@types/node", "@types/pg"]) {
+    assert(
+      installedManifest.peerDependencies?.[ambient] === undefined,
+      `installed package requires ambient types as a peer: ${ambient}`,
+    );
+  }
+  for (const ambient of ["@types/bun", "@types/node"]) {
+    assert(
+      installedManifest.dependencies?.[ambient] === undefined,
+      `installed package requires ambient types as a runtime dependency: ${ambient}`,
+    );
+  }
+  const pgTypesRange = installedManifest.dependencies?.["@types/pg"];
+  assert(
+    pgTypesRange !== undefined && /^[\^>]/.test(pgTypesRange),
+    `@types/pg must be a wide-range dependency so it dedupes, got ${pgTypesRange ?? "nothing"}`,
+  );
+  for (const [ambient, range] of Object.entries(options.devDependencies ?? {})) {
+    const installedVersion = await installedDependencyVersion(consumerRoot, ambient);
+    assert(
+      installedVersion !== undefined && satisfiesCaretMajor(range, installedVersion),
+      `${options.label} expected ${ambient}@${range} but resolved ${installedVersion ?? "nothing"}`,
+    );
+  }
+
   const distPresent = await pathExists(join(installedRoot, "dist"));
   assert(distPresent === options.expectDist, `${options.label} dist presence was ${distPresent}`);
   if (options.expectDist) {
@@ -198,8 +274,12 @@ async function verifyConsumer(options: ConsumerOptions): Promise<void> {
   runBinProbes(consumerRoot, Object.keys(installedManifest.bin));
   const exportCount = Object.keys(installedManifest.exports).length;
   const binCount = Object.keys(installedManifest.bin).length;
+  const ambient = Object.keys(options.devDependencies ?? {});
   console.log(
-    `${options.label}: ${exportCount}/${exportCount} imports, strict Bundler+NodeNext types, ${binCount}/${binCount} bins`,
+    `${options.label}: ${exportCount}/${exportCount} imports, ` +
+      `shipped declarations typecheck under ${strictFlagSets.map((flags) => flags.join(" ")).join(" / ")} ` +
+      `(Bundler+NodeNext), ${binCount}/${binCount} bins` +
+      (ambient.length > 0 ? `, install succeeded with ${ambient.join(", ")} pinned old` : ""),
   );
 }
 
@@ -228,24 +308,43 @@ function runRuntimeImports(
 function runStrictTypeProbes(consumerRoot: string): void {
   const typeScript = join(consumerRoot, "node_modules", "typescript", "bin", "tsc");
   for (const moduleResolution of ["Bundler", "NodeNext"] as const) {
-    runCommand(
-      [
-        "node",
-        typeScript,
-        "--noEmit",
-        "--strict",
-        "--target",
-        "ES2022",
-        "--module",
-        moduleResolution === "Bundler" ? "ESNext" : "NodeNext",
-        "--moduleResolution",
-        moduleResolution,
-        "package-consumer.ts",
-      ],
-      consumerRoot,
-      isolatedRuntimeEnvironment(consumerRoot),
-    );
+    for (const flags of strictFlagSets) {
+      runCommand(
+        [
+          "node",
+          typeScript,
+          "--noEmit",
+          ...flags,
+          "--target",
+          "ES2022",
+          "--module",
+          moduleResolution === "Bundler" ? "ESNext" : "NodeNext",
+          "--moduleResolution",
+          moduleResolution,
+          "package-consumer.ts",
+        ],
+        consumerRoot,
+        isolatedRuntimeEnvironment(consumerRoot),
+      );
+    }
   }
+}
+
+/** Version of a package as actually installed in the consumer tree. */
+async function installedDependencyVersion(
+  consumerRoot: string,
+  name: string,
+): Promise<string | undefined> {
+  const manifestPath = join(consumerRoot, "node_modules", ...name.split("/"), "package.json");
+  if (!(await pathExists(manifestPath))) return undefined;
+  return (await readJson<PackageManifest>(manifestPath)).version;
+}
+
+/** Minimal `^major.minor.patch` check — enough to prove a pin was honoured. */
+function satisfiesCaretMajor(range: string, version: string): boolean {
+  const wanted = /^\^?(\d+)\./.exec(range)?.[1];
+  const actual = /^(\d+)\./.exec(version)?.[1];
+  return wanted !== undefined && wanted === actual;
 }
 
 function runBinProbes(consumerRoot: string, binNames: string[]): void {

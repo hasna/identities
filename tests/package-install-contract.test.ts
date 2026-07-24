@@ -36,9 +36,10 @@ interface PackageManifest {
   devDependencies: Record<string, string>;
   exports: Record<string, PackageExport>;
   files: string[];
-  peerDependencies: Record<string, string>;
+  peerDependencies?: Record<string, string>;
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   scripts: Record<string, string>;
+  types: string;
 }
 
 afterAll(async () => {
@@ -46,44 +47,101 @@ afterAll(async () => {
 });
 
 describe("script-independent package install contract", () => {
-  test("routes Bun and TypeScript to shipped source while retaining built Node imports", async () => {
+  test("routes Bun to shipped source, TypeScript to shipped declarations, Node to dist", async () => {
     const manifest = await readManifest();
 
     const subpaths = Object.keys(manifest.exports);
     expect(subpaths.length).toBeGreaterThan(0);
     expect(manifest.files).toContain("src/**/*.ts");
     expect(manifest.files).toContain("!src/**/*.test.ts");
+    expect(manifest.files).toContain("types");
 
     for (const [subpath, entry] of Object.entries(manifest.exports)) {
       const source = sourceEntrypoint(subpath);
+      const declaration = declarationEntrypoint(subpath);
       expect(entry.bun).toBe(source);
-      expect(entry.types).toBe(source);
+      // Never the raw source: a consumer's own compiler flags (e.g.
+      // exactOptionalPropertyTypes) must not typecheck this package's implementation.
+      expect(entry.types).toBe(declaration);
       expect(entry.import?.startsWith("./dist/")).toBe(true);
       expect(await pathExists(join(packageRoot, source)), `${subpath} source target`).toBe(true);
+      expect(
+        await pathExists(join(packageRoot, declaration)),
+        `${subpath} declaration target`,
+      ).toBe(true);
     }
+    expect(manifest.types).toBe(declarationEntrypoint("."));
 
     expect(manifest.bin).toEqual({
       identities: "src/cli.ts",
       "identities-mcp": "src/mcp/index.ts",
       "identities-serve": "src/server/index.ts",
     });
-    // Ambient type packages needed to typecheck the shipped source are declared as
-    // wide-range peers so a package manager dedupes them with whatever the consumer
-    // already has. They must never become exact runtime pins (that forces a second
-    // @types/node into the consumer tree), and @types/bun must not be imposed at all
-    // because no public export needs Bun ambient types.
-    for (const ambient of ["@types/bun", "@types/node", "@types/pg"]) {
+    // Type packages must never be peers: npm fails an install outright (ERESOLVE)
+    // when a consumer pins a version outside a peer range, even an optional one.
+    // `@types/pg` is an ordinary wide-range dependency because the shipped
+    // `pg-store` declarations reference `pg` types; a conflicting consumer pin then
+    // nests instead of breaking the install. `@types/bun` and `@types/node` are not
+    // imposed at all — no shipped declaration needs their ambient types.
+    expect(manifest.peerDependencies).toBeUndefined();
+    expect(manifest.peerDependenciesMeta).toBeUndefined();
+    for (const ambient of ["@types/bun", "@types/node"]) {
       expect(Object.keys(manifest.dependencies), ambient).not.toContain(ambient);
     }
-    expect(Object.keys(manifest.peerDependencies).sort()).toEqual(["@types/node", "@types/pg"]);
-    for (const [ambient, range] of Object.entries(manifest.peerDependencies)) {
-      expect(range, ambient).toMatch(/^>=/);
-    }
-    expect(manifest.peerDependenciesMeta).toBeUndefined();
+    expect(manifest.dependencies["@types/pg"]).toMatch(/^[\^>]/);
     expect(manifest.scripts.prepublishOnly).toBe("bun run verify:release");
+    expect(manifest.scripts["verify:release"]).toContain("verify:shipped-types");
     expect(manifest.scripts.prepare).toBeUndefined();
     expect(manifest.scripts.postinstall).toBeUndefined();
   });
+
+  test("no shipped declaration depends on ambient Node types", async () => {
+    const offenders: string[] = [];
+    for await (const path of new Bun.Glob("**/*.d.ts").scan({
+      cwd: join(packageRoot, "types"),
+      onlyFiles: true,
+    })) {
+      const contents = await readFile(join(packageRoot, "types", path), "utf8");
+      if (/\bNodeJS\.|\bBuffer\b|types="node"/.test(contents)) offenders.push(path);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test("the committed declaration tree is in sync with src", async () => {
+    const result = Bun.spawnSync({
+      cmd: [process.execPath, join(packageRoot, "scripts", "verify-shipped-types.ts")],
+      cwd: packageRoot,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(commandResult(result).exitCode, commandResult(result).stderr).toBe(0);
+    expect(commandResult(result).stdout).toContain("declaration files match src/");
+  }, 60_000);
+
+  test("the freshness gate fails when the declaration tree drifts", async () => {
+    const staleRoot = await mkdtemp(join(tmpdir(), "identities-stale-types-"));
+    temporaryRoots.push(staleRoot);
+    await cp(join(packageRoot, "types"), staleRoot, { recursive: true });
+    await rm(join(staleRoot, "status.d.ts"));
+    await writeFile(join(staleRoot, "core.d.ts"), "export declare const drifted: true;\n");
+
+    const result = commandResult(Bun.spawnSync({
+      cmd: [
+        process.execPath,
+        join(packageRoot, "scripts", "verify-shipped-types.ts"),
+        "--committed",
+        staleRoot,
+      ],
+      cwd: packageRoot,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    }));
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("missing: status.d.ts");
+    expect(result.stderr).toContain("out of date: core.d.ts");
+  }, 60_000);
 
   test("strict consumer fixture imports every public export without skipLibCheck", async () => {
     const manifest = await readManifest();
@@ -153,39 +211,49 @@ describe("script-independent package install contract", () => {
     expect(captured).toContain("identities-package-consumers-");
   });
 
+  // A consumer may compile with flags stricter than this package uses. Because the
+  // `types` condition resolves to shipped declarations rather than the
+  // implementation, the strictest of these must stay clean.
+  const strictFlagSets = [
+    ["--strict"],
+    ["--strict", "--exactOptionalPropertyTypes", "--noUncheckedIndexedAccess"],
+  ] as const;
+
   for (const moduleResolution of ["Bundler", "NodeNext"] as const) {
-    test(`typechecks shipped source strictly with ${moduleResolution} resolution`, async () => {
-      const consumerRoot = await stageSourceOnlyConsumer();
-      await cp(
-        join(packageRoot, "tests", "fixtures", "package-consumer.ts"),
-        join(consumerRoot, "package-consumer.ts"),
-      );
-      const moduleKind = moduleResolution === "Bundler" ? "ESNext" : "NodeNext";
-      const typeProbe = Bun.spawnSync({
-        cmd: [
-          process.execPath,
-          join(packageRoot, "node_modules", "typescript", "bin", "tsc"),
-          "--noEmit",
-          "--strict",
-          "--target",
-          "ES2022",
-          "--module",
-          moduleKind,
-          "--moduleResolution",
-          moduleResolution,
-          "package-consumer.ts",
-        ],
-        cwd: consumerRoot,
-        env: isolatedEnvironment(consumerRoot),
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      expect(commandResult(typeProbe), `${moduleResolution} type probe`).toEqual({
-        exitCode: 0,
-        stderr: "",
-        stdout: "",
-      });
-    }, 15_000);
+    for (const flags of strictFlagSets) {
+      test(`typechecks a ${flags.length > 1 ? "stricter-than-ours" : "strict"} consumer with ${moduleResolution} resolution`, async () => {
+        const consumerRoot = await stageSourceOnlyConsumer();
+        await cp(
+          join(packageRoot, "tests", "fixtures", "package-consumer.ts"),
+          join(consumerRoot, "package-consumer.ts"),
+        );
+        const moduleKind = moduleResolution === "Bundler" ? "ESNext" : "NodeNext";
+        const typeProbe = Bun.spawnSync({
+          cmd: [
+            process.execPath,
+            join(packageRoot, "node_modules", "typescript", "bin", "tsc"),
+            "--noEmit",
+            ...flags,
+            "--target",
+            "ES2022",
+            "--module",
+            moduleKind,
+            "--moduleResolution",
+            moduleResolution,
+            "package-consumer.ts",
+          ],
+          cwd: consumerRoot,
+          env: isolatedEnvironment(consumerRoot),
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        expect(commandResult(typeProbe), `${moduleResolution} ${flags.join(" ")} probe`).toEqual({
+          exitCode: 0,
+          stderr: "",
+          stdout: "",
+        });
+      }, 30_000);
+    }
   }
 
   test("loads public entrypoints and runs all bins without lifecycle scripts or dist", async () => {
@@ -249,6 +317,10 @@ function sourceEntrypoint(subpath: string): string {
   return `./src/${subpath.slice(2)}${subpath === "./sdk" ? "/index" : ""}.ts`;
 }
 
+function declarationEntrypoint(subpath: string): string {
+  return `${sourceEntrypoint(subpath).replace("./src/", "./types/").slice(0, -3)}.d.ts`;
+}
+
 async function stageSourceOnlyConsumer(): Promise<string> {
   const consumerRoot = await mkdtemp(join(tmpdir(), "identities-source-install-"));
   temporaryRoots.push(consumerRoot);
@@ -259,6 +331,8 @@ async function stageSourceOnlyConsumer(): Promise<string> {
   await mkdir(packageDirectory, { recursive: true });
   await cp(join(packageRoot, "package.json"), join(packageDirectory, "package.json"));
   await cp(join(packageRoot, "src"), join(packageDirectory, "src"), { recursive: true });
+  // The declaration tree is committed, so an exact-Git install carries it too.
+  await cp(join(packageRoot, "types"), join(packageDirectory, "types"), { recursive: true });
 
   const developmentModules = join(packageRoot, "node_modules");
   for (const entry of await readdir(developmentModules)) {

@@ -1,10 +1,10 @@
 {
   "name": "@hasna/identities",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Open identity records for humans and AI agents",
   "type": "module",
   "main": "dist/src/index.js",
-  "types": "src/index.ts",
+  "types": "./types/index.d.ts",
   "bin": {
     "identities": "src/cli.ts",
     "identities-mcp": "src/mcp/index.ts",
@@ -12,78 +12,79 @@
   },
   "exports": {
     ".": {
+      "types": "./types/index.d.ts",
       "bun": "./src/index.ts",
-      "types": "./src/index.ts",
       "import": "./dist/src/index.js"
     },
     "./sdk": {
+      "types": "./types/sdk/index.d.ts",
       "bun": "./src/sdk/index.ts",
-      "types": "./src/sdk/index.ts",
       "import": "./dist/src/sdk/index.js"
     },
     "./pg-store": {
+      "types": "./types/pg-store.d.ts",
       "bun": "./src/pg-store.ts",
-      "types": "./src/pg-store.ts",
       "import": "./dist/src/pg-store.js"
     },
     "./migrations": {
+      "types": "./types/migrations.d.ts",
       "bun": "./src/migrations.ts",
-      "types": "./src/migrations.ts",
       "import": "./dist/src/migrations.js"
     },
     "./storage": {
+      "types": "./types/storage.d.ts",
       "bun": "./src/storage.ts",
-      "types": "./src/storage.ts",
       "import": "./dist/src/storage.js"
     },
     "./browserplan": {
+      "types": "./types/browserplan.d.ts",
       "bun": "./src/browserplan.ts",
-      "types": "./src/browserplan.ts",
       "import": "./dist/src/browserplan.js"
     },
     "./integrations": {
+      "types": "./types/integrations.d.ts",
       "bun": "./src/integrations.ts",
-      "types": "./src/integrations.ts",
       "import": "./dist/src/integrations.js"
     },
     "./instructions": {
+      "types": "./types/instructions.d.ts",
       "bun": "./src/instructions.ts",
-      "types": "./src/instructions.ts",
       "import": "./dist/src/instructions.js"
     },
     "./global-agent-rules": {
+      "types": "./types/global-agent-rules.d.ts",
       "bun": "./src/global-agent-rules.ts",
-      "types": "./src/global-agent-rules.ts",
       "import": "./dist/src/global-agent-rules.js"
     },
     "./ecosystem": {
+      "types": "./types/ecosystem.d.ts",
       "bun": "./src/ecosystem.ts",
-      "types": "./src/ecosystem.ts",
       "import": "./dist/src/ecosystem.js"
     },
     "./eve": {
+      "types": "./types/eve.d.ts",
       "bun": "./src/eve.ts",
-      "types": "./src/eve.ts",
       "import": "./dist/src/eve.js"
     },
     "./status": {
+      "types": "./types/status.d.ts",
       "bun": "./src/status.ts",
-      "types": "./src/status.ts",
       "import": "./dist/src/status.js"
     },
     "./media": {
+      "types": "./types/media.d.ts",
       "bun": "./src/media.ts",
-      "types": "./src/media.ts",
       "import": "./dist/src/media.js"
     },
     "./roster": {
+      "types": "./types/roster.d.ts",
       "bun": "./src/roster.ts",
-      "types": "./src/roster.ts",
       "import": "./dist/src/roster.js"
     }
   },
   "files": [
     "dist",
+    "types",
     "src/**/*.ts",
     "!src/**/*.test.ts",
     "README.md",
@@ -99,18 +100,20 @@
     "agents"
   ],
   "scripts": {
+    "build": "bun run clean && bun build ./src/index.ts ./src/storage.ts ./src/http-store.ts ./src/pg-store.ts ./src/migrations.ts ./src/version.ts ./src/browserplan.ts ./src/integrations.ts ./src/instructions.ts ./src/global-agent-rules.ts ./src/ecosystem.ts ./src/eve.ts ./src/status.ts ./src/media.ts ./src/roster.ts ./src/cli.ts ./src/mcp/index.ts ./src/server/index.ts ./src/sdk/index.ts --outdir dist --target bun --external pg --external @hasna/contracts --external @modelcontextprotocol/sdk --external zod && bun run build:types",
+    "build:types": "tsc --emitDeclarationOnly --outDir types",
     "clean": "rm -rf dist",
-    "build": "bun run clean && bun build ./src/index.ts ./src/storage.ts ./src/http-store.ts ./src/pg-store.ts ./src/migrations.ts ./src/version.ts ./src/browserplan.ts ./src/integrations.ts ./src/instructions.ts ./src/global-agent-rules.ts ./src/ecosystem.ts ./src/eve.ts ./src/status.ts ./src/media.ts ./src/roster.ts ./src/cli.ts ./src/mcp/index.ts ./src/server/index.ts ./src/sdk/index.ts --outdir dist --target bun --external pg --external @hasna/contracts --external @modelcontextprotocol/sdk --external zod && tsc --emitDeclarationOnly --outDir dist",
-    "generate:sdk": "bun run scripts/generate-sdk.ts",
-    "vendor-kit:check": "bunx @hasna/contracts vendor-kit . --check --no-contract",
-    "typecheck": "tsc --noEmit",
-    "test": "bun test",
-    "verify:release": "bun run typecheck && bun test && bun run vendor-kit:check && bun run build && bun run verify:package-consumers",
     "dev:cli": "bun run src/cli.ts",
     "dev:mcp": "bun run src/mcp/index.ts",
     "dev:serve": "bun run src/server/index.ts",
+    "generate:sdk": "bun run scripts/generate-sdk.ts",
     "prepublishOnly": "bun run verify:release",
-    "verify:package-consumers": "bun run scripts/verify-package-consumers.ts"
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "vendor-kit:check": "bunx @hasna/contracts vendor-kit . --check --no-contract",
+    "verify:package-consumers": "bun run scripts/verify-package-consumers.ts",
+    "verify:release": "bun run typecheck && bun test && bun run vendor-kit:check && bun run build && bun run verify:shipped-types && bun run verify:package-consumers",
+    "verify:shipped-types": "bun run scripts/verify-shipped-types.ts"
   },
   "keywords": [
     "identity",
@@ -143,18 +146,14 @@
   "devDependencies": {
     "@types/bun": "^1.2.4",
     "@types/node": "^26.1.1",
-    "@types/pg": "^8.11.10",
     "typescript": "^5.7.3"
   },
   "dependencies": {
     "@hasna/contracts": "0.4.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@types/pg": "^8.11.10",
     "jose": "6.2.3",
     "pg": "^8.16.3",
     "zod": "^3.24.2"
-  },
-  "peerDependencies": {
-    "@types/node": ">=20",
-    "@types/pg": ">=8.11.10"
   }
 }
