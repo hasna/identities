@@ -19,6 +19,9 @@ import {
 } from "../scripts/package-consumer-environment.js";
 
 const packageRoot = resolve(import.meta.dir, "..");
+
+/** Piped `Bun.spawnSync` result, named without depending on a bun-types alias. */
+type SpawnSyncResult = ReturnType<typeof runVerifier>;
 const temporaryRoots: string[] = [];
 
 interface PackageExport {
@@ -289,7 +292,7 @@ function isolatedEnvironment(root: string): Record<string, string | undefined> {
   };
 }
 
-function commandResult(result: Bun.SpawnSyncReturns<Buffer, Buffer>): {
+function commandResult(result: SpawnSyncResult): {
   exitCode: number;
   stderr: string;
   stdout: string;
@@ -340,7 +343,7 @@ function runVerifier(
   spec: string,
   harness: FakeBunHarness,
   extraEnv: Record<string, string> = {},
-): Bun.SpawnSyncReturns<Buffer, Buffer> {
+){
   return Bun.spawnSync({
     cmd: [
       process.execPath,
