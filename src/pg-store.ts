@@ -20,6 +20,7 @@ import {
   checkHealth,
   checkReady,
   createCloudPoolFromEnv,
+  type CreateCloudPoolFromEnvOptions,
   type HealthResult,
   type PoolQueryClient,
   type ReadyResult,
@@ -110,15 +111,21 @@ export interface CloudIdentityStore {
   close: () => Promise<void>;
 }
 
+export interface CreateCloudIdentityStoreOptions extends CreateCloudPoolFromEnvOptions {
+  storeId?: string;
+}
+
 /**
  * Build an {@link IdentityStore} backed by the shared cloud Postgres. Throws if
  * storage mode is not `cloud` or the database URL is missing (see kit contract).
  */
-export function createCloudIdentityStore(options: { storeId?: string; applicationName?: string } = {}): CloudIdentityStore {
+export function createCloudIdentityStore(options: CreateCloudIdentityStoreOptions = {}): CloudIdentityStore {
+  const { storeId, ...poolOptions } = options;
   const { client, connectionSource } = createCloudPoolFromEnv(IDENTITIES_APP_NAME, {
-    applicationName: options.applicationName ?? "identities-serve",
+    ...poolOptions,
+    applicationName: poolOptions.applicationName ?? "identities-serve",
   });
-  const store = new IdentityStore({ backend: new PgStorageBackend(client, options.storeId) });
+  const store = new IdentityStore({ backend: new PgStorageBackend(client, storeId) });
   return {
     store,
     lifecycleStore: new PgIdentityLifecycleStore(client),

@@ -19,8 +19,12 @@
 
 - Made exact Git dependencies usable without trusted lifecycle scripts by
   shipping the TypeScript source, routing Bun and type resolution to source,
-  keeping Node imports on the built distribution, and removing the obsolete
-  install-time data-directory side effect.
+  keeping Node imports on the built distribution, pinning a compatible Bun and
+  Node type pair for strict consumers, excluding source tests from the package,
+  and removing the obsolete install-time data-directory side effect.
+- Allowed self-hosted callers to pass an explicit environment and pool options
+  to `createCloudIdentityStore` without copying the database URL into
+  `process.env` or exposing the generated storage-kit internals.
 - Added the authoritative Identities-owned end-user lifecycle: relational
   users, tenants, memberships, normalized login identifiers, Argon2id
   credentials, invite/verification/recovery state, hashed rotating refresh

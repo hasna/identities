@@ -56,7 +56,7 @@ export {
   cloudHealth,
   cloudReady,
 } from "./pg-store.js";
-export type { CloudIdentityStore } from "./pg-store.js";
+export type { CloudIdentityStore, CreateCloudIdentityStoreOptions } from "./pg-store.js";
 export {
   CloudHttpIdentityStore,
   CloudHttpError,

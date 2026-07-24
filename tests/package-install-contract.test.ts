@@ -28,7 +28,9 @@ describe("script-independent package install contract", () => {
   test("routes Bun and TypeScript to shipped source while retaining built Node imports", async () => {
     const manifest = await readManifest();
 
-    expect(manifest.files).toContain("src");
+    expect(Object.keys(manifest.exports)).toHaveLength(16);
+    expect(manifest.files).toContain("src/**/*.ts");
+    expect(manifest.files).toContain("!src/**/*.test.ts");
 
     for (const [subpath, entry] of Object.entries(manifest.exports)) {
       const source = sourceEntrypoint(subpath);
@@ -49,6 +51,41 @@ describe("script-independent package install contract", () => {
     expect(manifest.scripts.prepare).toBeUndefined();
     expect(manifest.scripts.postinstall).toBeUndefined();
   });
+
+  for (const moduleResolution of ["Bundler", "NodeNext"] as const) {
+    test(`typechecks shipped source strictly with ${moduleResolution} resolution`, async () => {
+      const consumerRoot = await stageSourceOnlyConsumer();
+      await cp(
+        join(packageRoot, "tests", "fixtures", "package-consumer.ts"),
+        join(consumerRoot, "package-consumer.ts"),
+      );
+      const moduleKind = moduleResolution === "Bundler" ? "ESNext" : "NodeNext";
+      const typeProbe = Bun.spawnSync({
+        cmd: [
+          process.execPath,
+          join(packageRoot, "node_modules", "typescript", "bin", "tsc"),
+          "--noEmit",
+          "--strict",
+          "--target",
+          "ES2022",
+          "--module",
+          moduleKind,
+          "--moduleResolution",
+          moduleResolution,
+          "package-consumer.ts",
+        ],
+        cwd: consumerRoot,
+        env: isolatedEnvironment(consumerRoot),
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(commandResult(typeProbe), `${moduleResolution} type probe`).toEqual({
+        exitCode: 0,
+        stderr: "",
+        stdout: "",
+      });
+    }, 15_000);
+  }
 
   test("loads public entrypoints and runs all bins without lifecycle scripts or dist", async () => {
     const consumerRoot = await stageSourceOnlyConsumer();
@@ -77,36 +114,6 @@ describe("script-independent package install contract", () => {
       exitCode: 0,
       stderr: "",
       stdout: "source-only imports: ok",
-    });
-
-    await cp(
-      join(packageRoot, "tests", "fixtures", "package-consumer.ts"),
-      join(consumerRoot, "package-consumer.ts"),
-    );
-    const typeProbe = Bun.spawnSync({
-      cmd: [
-        process.execPath,
-        join(packageRoot, "node_modules", "typescript", "bin", "tsc"),
-        "--noEmit",
-        "--strict",
-        "--skipLibCheck",
-        "--target",
-        "ES2022",
-        "--module",
-        "ESNext",
-        "--moduleResolution",
-        "Bundler",
-        "package-consumer.ts",
-      ],
-      cwd: consumerRoot,
-      env: isolatedEnvironment(consumerRoot),
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    expect(commandResult(typeProbe)).toEqual({
-      exitCode: 0,
-      stderr: "",
-      stdout: "",
     });
 
     const binDirectory = join(consumerRoot, "node_modules", ".bin");
@@ -173,10 +180,14 @@ async function stageSourceOnlyConsumer(): Promise<string> {
 }
 
 function isolatedEnvironment(root: string): Record<string, string | undefined> {
-  return {
-    ...process.env,
-    OPEN_IDENTITIES_STORE: join(root, "identities.json"),
-  };
+  const env: Record<string, string | undefined> = { ...process.env };
+  for (const name of Object.keys(env)) {
+    if (/(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|DATABASE_URL|API_URL)$/i.test(name)) {
+      env[name] = undefined;
+    }
+  }
+  env.OPEN_IDENTITIES_STORE = join(root, "identities.json");
+  return env;
 }
 
 function commandResult(result: Bun.SpawnSyncReturns<Buffer, Buffer>): {

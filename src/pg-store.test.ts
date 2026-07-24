@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import { PgStorageBackend } from "./pg-store.js";
+import { describe, expect, spyOn, test } from "bun:test";
+import { PgStorageBackend, createCloudIdentityStore } from "./pg-store.js";
 import { IdentityStore, StorageConflictError, type IdentityStoreFile } from "./storage.js";
 
 // Minimal fake query client that emulates the identity_store JSONB row + rev.
@@ -73,5 +73,38 @@ describe("PgStorageBackend", () => {
     await expect(
       backend.write({ version: 1, identities: [], instructionSources: [] }, 4),
     ).rejects.toBeInstanceOf(StorageConflictError);
+  });
+
+  test("createCloudIdentityStore honors an explicit env without logging the database URL", async () => {
+    const databaseUrl = "postgresql://localhost:6543/identities_fixture";
+    const processDatabaseUrl = process.env["HASNA_IDENTITIES_DATABASE_URL"];
+    const output: string[] = [];
+    const log = spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(" "));
+    });
+    const warn = spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(" "));
+    });
+    const error = spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      output.push(args.map(String).join(" "));
+    });
+
+    try {
+      const cloud = createCloudIdentityStore({
+        env: {
+          HASNA_IDENTITIES_STORAGE_MODE: "cloud",
+          HASNA_IDENTITIES_DATABASE_URL: databaseUrl,
+        },
+        applicationName: "identities-explicit-env-test",
+      });
+      expect(cloud.connectionSource).toBe("HASNA_IDENTITIES_DATABASE_URL");
+      expect(process.env["HASNA_IDENTITIES_DATABASE_URL"]).toBe(processDatabaseUrl);
+      await cloud.close();
+      expect(output.join("\n")).not.toContain(databaseUrl);
+    } finally {
+      log.mockRestore();
+      warn.mockRestore();
+      error.mockRestore();
+    }
   });
 });
