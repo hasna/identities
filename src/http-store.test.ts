@@ -42,7 +42,7 @@ function mockFetch(handler: (call: RecordedCall) => { status?: number; json?: un
   };
 }
 
-const CONFIG = { apiUrl: "https://identities.hasna.xyz", apiKey: "test-key-abc" };
+const CONFIG = { apiUrl: "https://identities.your-deployment.example", apiKey: "test-key-abc" };
 const SAMPLE = { id: "agent:demo", kind: "agent", fullName: "Demo Agent", identifiers: [], emails: [], phones: [] };
 
 let active: { restore(): void } | undefined;
@@ -61,10 +61,10 @@ describe("resolveCloudHttpConfig", () => {
   test("returns config when both vars are set", () => {
     expect(
       resolveCloudHttpConfig({
-        HASNA_IDENTITIES_API_URL: "https://identities.hasna.xyz",
+        HASNA_IDENTITIES_API_URL: "https://identities.your-deployment.example",
         HASNA_IDENTITIES_API_KEY: "k",
       }),
-    ).toEqual({ apiUrl: "https://identities.hasna.xyz", apiKey: "k" });
+    ).toEqual({ apiUrl: "https://identities.your-deployment.example", apiKey: "k" });
   });
 
   test("throws when only one var is set (no silent local drift)", () => {
@@ -81,14 +81,14 @@ describe("resolveIdentityStore", () => {
   });
 
   test("uses cloud store when both env vars are set", () => {
-    process.env["HASNA_IDENTITIES_API_URL"] = "https://identities.hasna.xyz";
+    process.env["HASNA_IDENTITIES_API_URL"] = "https://identities.your-deployment.example";
     process.env["HASNA_IDENTITIES_API_KEY"] = "k";
     const store = resolveIdentityStore();
     expect(store).toBeInstanceOf(CloudHttpIdentityStore);
   });
 
   test("preferLocal forces the local store even when env is set", () => {
-    process.env["HASNA_IDENTITIES_API_URL"] = "https://identities.hasna.xyz";
+    process.env["HASNA_IDENTITIES_API_URL"] = "https://identities.your-deployment.example";
     process.env["HASNA_IDENTITIES_API_KEY"] = "k";
     const store = resolveIdentityStore({ preferLocal: true });
     expect(store).not.toBeInstanceOf(CloudHttpIdentityStore);
@@ -102,7 +102,7 @@ describe("CloudHttpIdentityStore CRUD mapping", () => {
     const store = new CloudHttpIdentityStore(CONFIG);
     const list = await store.list();
     expect(list).toHaveLength(1);
-    expect(m.calls[0].url).toBe("https://identities.hasna.xyz/v1/identities");
+    expect(m.calls[0].url).toBe("https://identities.your-deployment.example/v1/identities");
     expect(m.calls[0].method).toBe("GET");
     expect(m.calls[0].headers["Authorization"]).toBe("Bearer test-key-abc");
   });
@@ -124,7 +124,7 @@ describe("CloudHttpIdentityStore CRUD mapping", () => {
     const created = await store.create({ kind: "agent", fullName: "Demo Agent" });
     expect(created.id).toBe("agent:demo");
     expect(m.calls[0].method).toBe("POST");
-    expect(m.calls[0].url).toBe("https://identities.hasna.xyz/v1/identities");
+    expect(m.calls[0].url).toBe("https://identities.your-deployment.example/v1/identities");
     expect(m.calls[0].headers["Idempotency-Key"]).toBeTruthy();
   });
 
@@ -153,7 +153,7 @@ describe("CloudHttpIdentityStore CRUD mapping", () => {
     active = m;
     const store = new CloudHttpIdentityStore(CONFIG);
     await store.linkEmail("agent:demo", "demo@hasna.com");
-    expect(m.calls[0].url).toBe("https://identities.hasna.xyz/v1/identities/agent%3Ademo/emails");
+    expect(m.calls[0].url).toBe("https://identities.your-deployment.example/v1/identities/agent%3Ademo/emails");
     expect(m.calls[0].body).toEqual({ address: "demo@hasna.com" });
   });
 

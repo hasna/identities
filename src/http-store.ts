@@ -43,7 +43,7 @@ import type {
 } from "./types.js";
 
 export interface CloudHttpConfig {
-  /** Base URL, e.g. https://identities.hasna.xyz (the `/v1` prefix is appended). */
+  /** Base URL, e.g. https://identities.your-deployment.example (the `/v1` prefix is appended). */
   apiUrl: string;
   /** Bearer API key (never logged). */
   apiKey: string;
