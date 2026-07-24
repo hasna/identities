@@ -184,6 +184,44 @@ See [docs/integrations.md](docs/integrations.md) for the first sync contract.
 See [docs/browserplan.md](docs/browserplan.md) for the BrowserPlan machine, identity, email, and profile reservation contract.
 See [docs/media.md](docs/media.md) for voice and profile image generation.
 See [docs/instructions.md](docs/instructions.md) for the instruction-source schema, precedence, export contract, and fail-closed safety rules.
+See [docs/identity-contract.md](docs/identity-contract.md) for the versioned canonical agent identity, scoped handle/alias resolver, runtime-context, five-part source-lineage revision history, and dry-run migration contracts. Cross-repo consumers can vendor [the V1 conformance fixture](docs/fixtures/agent-identity-v1.conformance.json), identified as `hasna.identities.agent-identity/v1/conformance/1`; the SDK exports its repository-relative path and SHA-256 fingerprint for deterministic pinning without machine paths or network tests.
+
+## Scoped access-token contract
+
+`@hasna/identities` exports a reusable asymmetric JWT contract for local and
+self-hosted consumers. It validates configured issuer, audience, and
+public-key algorithms; requires `sub`, `tenant`, `session`, `scopes`, `iat`,
+`nbf`, `exp`, and `jti`; enforces tenant and scope requirements; and checks
+only SHA-256 forms of token IDs and session-family IDs against the caller's
+revocation store. Unknown, revoked, unpublished, or out-of-window signing keys
+fail closed.
+
+`IdentityJwksRegistry` publishes standard public JWK fields plus rotation status
+for active and retiring keys. Revoked keys and private JWK members are never
+published; `revoked_kids` carries value-free revocation tombstones, and
+consumers can fence rollback with `minimumJwksRevision`.
+`createIdentityAuthApi` provides composable
+`GET /.well-known/jwks.json` and `POST /v1/auth/verify` handlers; it does not
+load signing keys or silently enable a deployment.
+
+Operators can verify a token without putting it in shell arguments:
+
+```bash
+identities auth verify \
+  --token-file /owner-only/access-token \
+  --jwks-file /etc/identities/public-jwks.json \
+  --token-state-file /var/lib/identities/hashed-token-state.json \
+  --issuer https://identity.example \
+  --audience infinity-local \
+  --algorithm EdDSA \
+  --tenant tenant-acme \
+  --scope runs:write
+```
+
+The token file must be owner-only. The state file contains only lowercase
+SHA-256 hashes and session-family statuses. Private signing keys remain
+caller-owned and are accepted only as runtime inputs to
+`issueIdentityAccessToken`.
 
 ## Instruction Sources
 
