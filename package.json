@@ -1,75 +1,91 @@
 {
   "name": "@hasna/identities",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Open identity records for humans and AI agents",
   "type": "module",
   "main": "dist/src/index.js",
-  "types": "dist/index.d.ts",
+  "types": "src/index.ts",
   "bin": {
-    "identities": "dist/src/cli.js",
-    "identities-mcp": "dist/src/mcp/index.js",
-    "identities-serve": "dist/src/server/index.js"
+    "identities": "src/cli.ts",
+    "identities-mcp": "src/mcp/index.ts",
+    "identities-serve": "src/server/index.ts"
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "types": "./src/index.ts",
       "import": "./dist/src/index.js"
     },
     "./sdk": {
-      "types": "./dist/sdk/index.d.ts",
+      "bun": "./src/sdk/index.ts",
+      "types": "./src/sdk/index.ts",
       "import": "./dist/src/sdk/index.js"
     },
     "./pg-store": {
-      "types": "./dist/pg-store.d.ts",
+      "bun": "./src/pg-store.ts",
+      "types": "./src/pg-store.ts",
       "import": "./dist/src/pg-store.js"
     },
     "./migrations": {
-      "types": "./dist/migrations.d.ts",
+      "bun": "./src/migrations.ts",
+      "types": "./src/migrations.ts",
       "import": "./dist/src/migrations.js"
     },
     "./storage": {
-      "types": "./dist/storage.d.ts",
+      "bun": "./src/storage.ts",
+      "types": "./src/storage.ts",
       "import": "./dist/src/storage.js"
     },
     "./browserplan": {
-      "types": "./dist/browserplan.d.ts",
+      "bun": "./src/browserplan.ts",
+      "types": "./src/browserplan.ts",
       "import": "./dist/src/browserplan.js"
     },
     "./integrations": {
-      "types": "./dist/integrations.d.ts",
+      "bun": "./src/integrations.ts",
+      "types": "./src/integrations.ts",
       "import": "./dist/src/integrations.js"
     },
     "./instructions": {
-      "types": "./dist/instructions.d.ts",
+      "bun": "./src/instructions.ts",
+      "types": "./src/instructions.ts",
       "import": "./dist/src/instructions.js"
     },
     "./global-agent-rules": {
-      "types": "./dist/global-agent-rules.d.ts",
+      "bun": "./src/global-agent-rules.ts",
+      "types": "./src/global-agent-rules.ts",
       "import": "./dist/src/global-agent-rules.js"
     },
     "./ecosystem": {
-      "types": "./dist/ecosystem.d.ts",
+      "bun": "./src/ecosystem.ts",
+      "types": "./src/ecosystem.ts",
       "import": "./dist/src/ecosystem.js"
     },
     "./eve": {
-      "types": "./dist/eve.d.ts",
+      "bun": "./src/eve.ts",
+      "types": "./src/eve.ts",
       "import": "./dist/src/eve.js"
     },
     "./status": {
-      "types": "./dist/status.d.ts",
+      "bun": "./src/status.ts",
+      "types": "./src/status.ts",
       "import": "./dist/src/status.js"
     },
     "./media": {
-      "types": "./dist/media.d.ts",
+      "bun": "./src/media.ts",
+      "types": "./src/media.ts",
       "import": "./dist/src/media.js"
     },
     "./roster": {
-      "types": "./dist/roster.d.ts",
+      "bun": "./src/roster.ts",
+      "types": "./src/roster.ts",
       "import": "./dist/src/roster.js"
     }
   },
   "files": [
     "dist",
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
     "README.md",
     "LICENSE",
     "SECURITY.md",
@@ -89,12 +105,12 @@
     "vendor-kit:check": "bunx @hasna/contracts vendor-kit . --check --no-contract",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "verify:release": "bun run typecheck && bun test && bun run vendor-kit:check && bun run build",
+    "verify:release": "bun run typecheck && bun test && bun run vendor-kit:check && bun run build && bun run verify:package-consumers",
     "dev:cli": "bun run src/cli.ts",
     "dev:mcp": "bun run src/mcp/index.ts",
     "dev:serve": "bun run src/server/index.ts",
     "prepublishOnly": "bun run verify:release",
-    "postinstall": "mkdir -p $HOME/.hasna/identities 2>/dev/null || true"
+    "verify:package-consumers": "bun run scripts/verify-package-consumers.ts"
   },
   "keywords": [
     "identity",
@@ -126,7 +142,7 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "@types/bun": "^1.2.4",
-    "@types/node": "^22.13.4",
+    "@types/node": "^26.1.1",
     "@types/pg": "^8.11.10",
     "typescript": "^5.7.3"
   },
@@ -136,5 +152,9 @@
     "jose": "6.2.3",
     "pg": "^8.16.3",
     "zod": "^3.24.2"
+  },
+  "peerDependencies": {
+    "@types/node": ">=20",
+    "@types/pg": ">=8.11.10"
   }
 }

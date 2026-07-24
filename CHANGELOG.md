@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 - 2026-07-24
+
+- Fixed scriptless exact-Git installs: `bun add github:hasna/identities#<sha>` previously produced an unusable package because the tree has no `dist` and the install-time hook was blocked as an untrusted lifecycle script.
+- Added a `bun` export condition, source `types`, and `src/**/*.ts` (minus tests) to the published files so Bun and TypeScript resolve the shipped source while Node keeps importing the built `dist` output.
+- Pointed the `identities`, `identities-mcp`, and `identities-serve` bins at the executable shipped sources so they run from a Git install as well as a registry install.
+- Removed the `postinstall` directory hook; the store already creates its data directory on demand with `0700` permissions, so the hook was redundant and only widened those permissions.
+- Declared `@types/node` and `@types/pg` as wide-range peer dependencies (never exact runtime pins) so consumers typechecking the shipped source dedupe them instead of getting a second copy; `@types/bun` is not imposed on consumers at all.
+- Added `bun run verify:package-consumers`, wired into `verify:release` and CI, which packs the tarball and proves every export, type condition, and bin works for a Bun consumer, an npm/Node consumer, and (with `--spec`) an exact-SHA Git consumer, with no trusted lifecycle scripts.
+
 ## 0.3.5 - 2026-07-20
 
 - operating rules v1.1.5 — eliminate phantom-freeze stop/defer; keep prompt-injection firewall.
