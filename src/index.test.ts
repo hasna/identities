@@ -1041,6 +1041,8 @@ describe("open-identities", () => {
     expect(overlay?.content).toContain("Recovery reuses the stable goal-plan and Todos identifiers");
     expect(overlay?.content).toContain("add explicit adversarial verification goal nodes or steps");
     expect(overlay?.content).toContain("Codewith native /loop");
+    expect(overlay?.content).toContain("heavy Rust and Bazel builds are remote by default");
+    expect(overlay?.content).toContain("Remote-build setup must not expose secrets");
     expect(policy).toContain("Do not set Codewith goal, token, or goal-plan budgets unless the user explicitly asks for budgets");
     expect(exported.sources.map((source) => source.id)).toEqual([
       "hasna-global-coding-agent-non-overridable-rules",
@@ -1052,6 +1054,8 @@ describe("open-identities", () => {
       "provider:codewith:native-goals",
       "provider:codewith:goal-plan-adversarial-steps",
       "provider:codewith:native-loops",
+      "provider:codewith:remote-rust-bazel-builds",
+      "provider:codewith:buildbuddy-secret-safety",
       "provider:codewith:no-tmux-fallback",
     ]);
   });
