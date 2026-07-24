@@ -15,14 +15,12 @@
 - Add non-overridable worktree, PR-first, no-main-push, autonomous repair, conversations surfaces, and no-budget-unless-requested rules.
 
 
-## Unreleased
+## 0.4.0 - 2026-07-24
 
-- Added reusable scoped JWT verification and issuance, public JWKS rotation
-  status, hashed token/session-family revocation checks, and composable auth
-  API and CLI surfaces for local and self-hosted consumers.
-- Added the versioned canonical agent identity V1 contract with immutable `identity_id` authority, tenant/namespace-scoped handles and additive aliases, one typed `IDENTITY_ALIAS_AMBIGUOUS` fail-closed boundary, exact five-part source lineage, append-only source-mapping revisions (`create`, `unchanged`, `promote`, `correct`, `retire`), quarantined similarity candidates, structured `runtime_instance_id` context with external Runtime Coordination lease/fence ownership, a read-only Machines+Projects assignment projection, lifecycle-aware zero-write migration reports, canonical/canary/rollback read preferences, and a pinned machine-independent conformance fixture.
-- Bumped `hasna-agent-operating-rules` to v1.1.2 (2026-07-09) and expanded the canonical source set with rules for automatic session renaming, task-specific worktree mutation under `$HOME/.hasna/repos/worktrees`, PR-first landing, no direct pushes to main/default/protected branches, autonomous repair before asking, full Hasna CLI/package source-of-truth coverage, default conversation surfaces plus `conversations blockers`, durable goal-plan adversarial verification, and Codewith goal/token/goal-plan budget opt-in only.
-- Added Antigravity as an active global instruction provider target and provider overlay, while keeping Gemini out of active target/provider compatibility coverage.
+- Added the versioned canonical agent identity V1 contract with immutable `identity_id` authority, tenant/namespace-scoped handles and additive aliases, one typed `IDENTITY_ALIAS_AMBIGUOUS` fail-closed boundary, exact five-part source lineage, append-only source-mapping revisions (`create`, `unchanged`, `promote`, `correct`, `retire`), quarantined similarity candidates, structured `runtime_instance_id` context with external Runtime Coordination lease/fence ownership, a read-only Machines+Projects assignment projection, lifecycle-aware zero-write migration reports, canonical/canary/rollback read preferences, and a pinned machine-independent conformance fixture (#14).
+- Added reusable scoped JWT verification and issuance, public JWKS rotation status, hashed token/session-family revocation checks, and composable auth API and CLI surfaces for local and self-hosted consumers (#14).
+- Security: removed internal infra hostnames from the published package (#11).
+- Global agent rules: added the Codewith remote build policy (heavy Rust/Bazel builds remote by default via GitHub Actions/BuildBuddy, secret-safe `BUILDBUDDY_API_KEY` handling) (#10), clarified coordinator task ownership, capability-gated canonical execution roots, and made the canonical worktree path `<repo-name>/<worktree-name>` (#13).
 
 ## 0.2.1
 
