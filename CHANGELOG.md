@@ -24,7 +24,13 @@
   and removing the obsolete install-time data-directory side effect.
 - Allowed self-hosted callers to pass an explicit environment and pool options
   to `createCloudIdentityStore` without copying the database URL into
-  `process.env` or exposing the generated storage-kit internals.
+  `process.env`. The returned store now exposes a pool-free query and
+  transaction facade, redacts certificate-path failures, and keeps connection
+  credentials outside public object traversal and diagnostic output.
+- Hardened the exact-Git package verifier to require a full lowercase commit
+  SHA, strict-type every public subpath under Bundler and NodeNext resolution,
+  isolate child package-manager and runtime configuration, and propagate
+  installer failures.
 - Added the authoritative Identities-owned end-user lifecycle: relational
   users, tenants, memberships, normalized login identifiers, Argon2id
   credentials, invite/verification/recovery state, hashed rotating refresh

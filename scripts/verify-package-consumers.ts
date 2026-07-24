@@ -3,6 +3,10 @@
 import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import {
+  isolatedPackageConsumerEnvironment,
+  preparePackageConsumerEnvironment,
+} from "./package-consumer-environment.js";
 
 const packageRoot = resolve(import.meta.dir, "..");
 const packageManifest = await readJson<PackageManifest>(join(packageRoot, "package.json"));
@@ -11,6 +15,7 @@ const typeScriptVersion = packageManifest.devDependencies?.typescript;
 assert(typeScriptVersion !== undefined, "package manifest is missing the TypeScript verifier dependency");
 const args = Bun.argv.slice(2).filter((argument) => argument !== "--");
 const explicitSpec = argumentValue(args, "--spec");
+if (explicitSpec !== undefined) validateExactGitSpec(explicitSpec);
 const temporaryRoot = await mkdtemp(join(tmpdir(), "identities-package-consumers-"));
 
 interface PackageExport {
@@ -82,9 +87,11 @@ try {
 async function createAndInspectTarball(): Promise<string> {
   const packDirectory = join(temporaryRoot, "pack");
   await mkdir(packDirectory, { recursive: true });
+  await preparePackageConsumerEnvironment(packDirectory);
   const result = runCommand(
     ["npm", "pack", "--json", "--ignore-scripts", "--pack-destination", packDirectory],
     packageRoot,
+    quietInstallEnvironment(packDirectory),
   );
   const [packed] = JSON.parse(result.stdout) as PackResult[];
   assert(packed !== undefined, "npm pack returned no package");
@@ -115,6 +122,7 @@ async function createAndInspectTarball(): Promise<string> {
 async function verifyConsumer(options: ConsumerOptions): Promise<void> {
   const consumerRoot = join(temporaryRoot, options.label);
   await mkdir(consumerRoot, { recursive: true });
+  await preparePackageConsumerEnvironment(consumerRoot);
   const dependencySpec = options.packageSpec.startsWith("/")
     ? `file:${options.packageSpec}`
     : options.packageSpec;
@@ -143,13 +151,13 @@ async function verifyConsumer(options: ConsumerOptions): Promise<void> {
         String(minimumReleaseAgeSeconds),
       ],
       consumerRoot,
-      quietInstallEnvironment(),
+      quietInstallEnvironment(consumerRoot),
     );
   } else {
     runCommand(
       ["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund"],
       consumerRoot,
-      quietInstallEnvironment(),
+      quietInstallEnvironment(consumerRoot),
     );
   }
 
@@ -173,23 +181,25 @@ async function verifyConsumer(options: ConsumerOptions): Promise<void> {
   }
 
   if (options.manager === "bun") {
-    const untrusted = runCommand(["bun", "pm", "untrusted"], consumerRoot);
+    const untrusted = runCommand(
+      ["bun", "pm", "untrusted"],
+      consumerRoot,
+      isolatedRuntimeEnvironment(consumerRoot),
+    );
     assert(
       /(?:0|no) untrusted/i.test(`${untrusted.stdout}\n${untrusted.stderr}`),
       `${options.label} has untrusted lifecycle scripts`,
     );
   }
 
-  await cp(
-    join(packageRoot, "tests", "fixtures", "package-consumer.ts"),
-    join(consumerRoot, "package-consumer.ts"),
-  );
+  await cp(join(packageRoot, "tests", "fixtures", "package-consumer.ts"), join(consumerRoot, "package-consumer.ts"));
   runRuntimeImports(consumerRoot, options.runtime, Object.keys(installedManifest.exports));
+  runCredentialBoundaryProbe(consumerRoot, options.runtime);
   runStrictTypeProbes(consumerRoot);
   runBinProbes(consumerRoot);
   const exportCount = Object.keys(installedManifest.exports).length;
   console.log(
-    `${options.label}: ${exportCount}/${exportCount} imports, strict Bundler+NodeNext types, 3/3 bins`,
+    `${options.label}: ${exportCount}/${exportCount} imports, credential-safe cloud client, strict Bundler+NodeNext types, 3/3 bins`,
   );
 }
 
@@ -205,6 +215,70 @@ function runRuntimeImports(
     `const specifiers = ${JSON.stringify(specifiers)};`,
     "for (const specifier of specifiers) await import(specifier);",
     'console.log(`${specifiers.length}/${specifiers.length} imports`);',
+  ].join("\n");
+  runCommand(
+    runtime === "bun"
+      ? [process.execPath, "-e", probe]
+      : ["node", "--input-type=module", "-e", probe],
+    consumerRoot,
+    isolatedRuntimeEnvironment(consumerRoot),
+  );
+}
+
+function runCredentialBoundaryProbe(
+  consumerRoot: string,
+  runtime: "bun" | "node",
+): void {
+  const probe = [
+    'import { inspect } from "node:util";',
+    'import { createCloudIdentityStore } from "@hasna/identities/pg-store";',
+    'const passwordMarker = "installed-identity-password-marker";',
+    'const databaseMarker = "installed-identity-database-marker";',
+    'const databaseUrl = `postgresql://identity-user:${passwordMarker}@127.0.0.1:1/${databaseMarker}`;',
+    "function graphContains(value, marker, depth = 12, seen = new Set()) {",
+    '  if (typeof value === "string") return value.includes(marker);',
+    '  if ((typeof value !== "object" && typeof value !== "function") || value === null || depth === 0) return false;',
+    "  if (seen.has(value)) return false;",
+    "  seen.add(value);",
+    "  for (const key of Reflect.ownKeys(value)) {",
+    "    const descriptor = Object.getOwnPropertyDescriptor(value, key);",
+    '    if (descriptor && "value" in descriptor && graphContains(descriptor.value, marker, depth - 1, seen)) return true;',
+    "  }",
+    "  return false;",
+    "}",
+    "const cloud = createCloudIdentityStore({",
+    '  applicationName: "identities-installed-boundary-probe",',
+    "  env: {",
+    '    HASNA_IDENTITIES_STORAGE_MODE: "cloud",',
+    "    HASNA_IDENTITIES_DATABASE_URL: databaseUrl,",
+    "  },",
+    "});",
+    "try {",
+    '  if ("pool" in cloud.client || "close" in cloud.client) throw new Error("public query client exposes pool authority");',
+    "  for (const marker of [databaseUrl, passwordMarker, databaseMarker]) {",
+    '    if (graphContains(cloud, marker)) throw new Error("public cloud object graph exposes connection credentials");',
+    '    if (JSON.stringify(cloud).includes(marker)) throw new Error("public cloud JSON exposes connection credentials");',
+    '    if (inspect(cloud, { depth: 12, showHidden: true }).includes(marker)) throw new Error("public cloud inspection exposes connection credentials");',
+    "  }",
+    '  const pathMarker = "installed-identity-ca-path-marker";',
+    "  let certificateError;",
+    "  try {",
+    "    createCloudIdentityStore({",
+    "      env: {",
+    '        HASNA_IDENTITIES_STORAGE_MODE: "cloud",',
+    '        HASNA_IDENTITIES_DATABASE_URL: "postgresql://identity-user:installed-password-marker@127.0.0.1:1/identity?sslmode=verify-full",',
+    "      },",
+    "      caCertPath: `/tmp/${pathMarker}.pem`,",
+    "    });",
+    "  } catch (error) {",
+    "    certificateError = error;",
+    "  }",
+    '  if (!(certificateError instanceof Error)) throw new Error("missing certificate-path failure");',
+    '  if (String(certificateError).includes(pathMarker)) throw new Error("certificate error exposes its path");',
+    '  if (certificateError.cause !== undefined || "path" in certificateError) throw new Error("certificate error exposes filesystem details");',
+    "} finally {",
+    "  await cloud.close();",
+    "}",
   ].join("\n");
   runCommand(
     runtime === "bun"
@@ -257,16 +331,27 @@ function runBinProbes(consumerRoot: string): void {
 }
 
 function argumentValue(arguments_: string[], name: string): string | undefined {
-  const index = arguments_.indexOf(name);
-  if (index === -1) return undefined;
+  const indexes = arguments_
+    .map((argument, index) => argument === name ? index : -1)
+    .filter((index) => index !== -1);
+  assert(indexes.length <= 1, `${name} may only be provided once`);
+  const [index] = indexes;
+  if (index === undefined) return undefined;
   const value = arguments_[index + 1];
   assert(value !== undefined && !value.startsWith("--"), `${name} requires a value`);
   return value;
 }
 
+function validateExactGitSpec(spec: string): void {
+  assert(
+    /^github:hasna\/identities#[0-9a-f]{40}$/.test(spec),
+    "--spec must be github:hasna/identities# followed by a 40-character lowercase commit SHA",
+  );
+}
+
 function isolatedRuntimeEnvironment(root: string): Record<string, string | undefined> {
   return {
-    ...sanitizedBaseEnvironment(),
+    ...isolatedPackageConsumerEnvironment(root),
     HASNA_IDENTITIES_DATABASE_URL: undefined,
     HASNA_IDENTITIES_STORAGE_MODE: "local",
     IDENTITIES_DATABASE_URL: undefined,
@@ -275,29 +360,19 @@ function isolatedRuntimeEnvironment(root: string): Record<string, string | undef
   };
 }
 
-function quietInstallEnvironment(): Record<string, string | undefined> {
+function quietInstallEnvironment(root: string): Record<string, string | undefined> {
   return {
-    ...sanitizedBaseEnvironment(),
+    ...isolatedPackageConsumerEnvironment(root),
     npm_config_audit: "false",
     npm_config_fund: "false",
     npm_config_progress: "false",
   };
 }
 
-function sanitizedBaseEnvironment(): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = { ...process.env };
-  for (const name of Object.keys(env)) {
-    if (/(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|DATABASE_URL|API_URL)$/i.test(name)) {
-      env[name] = undefined;
-    }
-  }
-  return env;
-}
-
 function runCommand(
   cmd: string[],
   cwd: string,
-  env: Record<string, string | undefined> = process.env,
+  env: Record<string, string | undefined>,
 ): { stderr: string; stdout: string } {
   const result = Bun.spawnSync({
     cmd,

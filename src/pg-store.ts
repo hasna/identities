@@ -22,12 +22,16 @@ import {
   createCloudPoolFromEnv,
   type CreateCloudPoolFromEnvOptions,
   type HealthResult,
-  type PoolQueryClient,
   type ReadyResult,
   type TypedQueryClient,
 } from "./generated/storage-kit/index.js";
 import { DEFAULT_STORE_ID, IDENTITY_AUDIT_TABLE, IDENTITY_STORE_TABLE, identitiesMigrations } from "./migrations.js";
 import { PgIdentityLifecycleStore } from "./pg-user-lifecycle.js";
+import {
+  restrictTransactionalQueryClient,
+  restrictTypedQueryClient,
+  type TransactionalQueryClient,
+} from "./transactional-query-client.js";
 
 export const IDENTITIES_APP_NAME = "identities";
 
@@ -42,10 +46,13 @@ interface StoreRow {
 
 /** JSONB-document backend guarded by an optimistic-concurrency `rev`. */
 export class PgStorageBackend implements StorageBackend {
-  constructor(
-    private readonly client: TypedQueryClient,
-    private readonly storeId: string = DEFAULT_STORE_ID,
-  ) {}
+  private readonly client: TypedQueryClient;
+  private readonly storeId: string;
+
+  constructor(client: TypedQueryClient, storeId: string = DEFAULT_STORE_ID) {
+    this.client = restrictTypedQueryClient(client);
+    this.storeId = storeId;
+  }
 
   async read(): Promise<StorageSnapshot> {
     const row = await this.client.get<StoreRow>(
@@ -106,7 +113,7 @@ export class PgStorageBackend implements StorageBackend {
 export interface CloudIdentityStore {
   store: IdentityStore;
   lifecycleStore: PgIdentityLifecycleStore;
-  client: PoolQueryClient;
+  client: TransactionalQueryClient;
   connectionSource: string;
   close: () => Promise<void>;
 }
@@ -121,10 +128,8 @@ export interface CreateCloudIdentityStoreOptions extends CreateCloudPoolFromEnvO
  */
 export function createCloudIdentityStore(options: CreateCloudIdentityStoreOptions = {}): CloudIdentityStore {
   const { storeId, ...poolOptions } = options;
-  const { client, connectionSource } = createCloudPoolFromEnv(IDENTITIES_APP_NAME, {
-    ...poolOptions,
-    applicationName: poolOptions.applicationName ?? "identities-serve",
-  });
+  const { client: poolClient, connectionSource } = createIdentitiesCloudPool(poolOptions);
+  const client = restrictTransactionalQueryClient(poolClient);
   const store = new IdentityStore({ backend: new PgStorageBackend(client, storeId) });
   return {
     store,
@@ -132,9 +137,30 @@ export function createCloudIdentityStore(options: CreateCloudIdentityStoreOption
     client,
     connectionSource,
     close: async () => {
-      await client.close();
+      await poolClient.close();
     },
   };
+}
+
+function createIdentitiesCloudPool(options: CreateCloudPoolFromEnvOptions) {
+  try {
+    return createCloudPoolFromEnv(IDENTITIES_APP_NAME, {
+      ...options,
+      applicationName: options.applicationName ?? "identities-serve",
+    });
+  } catch (error) {
+    if (isCertificateFileAccessError(error)) {
+      throw new Error("Unable to load the configured identities database CA certificate.");
+    }
+    throw error;
+  }
+}
+
+function isCertificateFileAccessError(error: unknown): boolean {
+  if (!(error instanceof Error) || !("code" in error) || typeof error.code !== "string") {
+    return false;
+  }
+  return ["EACCES", "EISDIR", "ENOENT", "ENOTDIR"].includes(error.code);
 }
 
 /** Apply all pending cloud migrations (identity store + api keys). */

@@ -57,6 +57,7 @@ export {
   cloudReady,
 } from "./pg-store.js";
 export type { CloudIdentityStore, CreateCloudIdentityStoreOptions } from "./pg-store.js";
+export type { TransactionalQueryClient } from "./transactional-query-client.js";
 export {
   CloudHttpIdentityStore,
   CloudHttpError,

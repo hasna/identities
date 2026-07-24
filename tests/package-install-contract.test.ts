@@ -1,7 +1,22 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink } from "node:fs/promises";
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import {
+  isolatedPackageConsumerEnvironment,
+  preparePackageConsumerEnvironment,
+} from "../scripts/package-consumer-environment.js";
 
 const packageRoot = resolve(import.meta.dir, "..");
 const temporaryRoots: string[] = [];
@@ -50,6 +65,74 @@ describe("script-independent package install contract", () => {
     expect(manifest.scripts.prepublishOnly).toBe("bun run verify:release");
     expect(manifest.scripts.prepare).toBeUndefined();
     expect(manifest.scripts.postinstall).toBeUndefined();
+  });
+
+  test("strict consumer fixture imports every public export without skipLibCheck", async () => {
+    const manifest = await readManifest();
+    const fixture = await readFile(
+      join(packageRoot, "tests", "fixtures", "package-consumer.ts"),
+      "utf8",
+    );
+    const importedSpecifiers = Array.from(
+      fixture.matchAll(/from "(@hasna\/identities(?:\/[^"]+)?)"/g),
+      (match) => match[1],
+    ).sort();
+    const expectedSpecifiers = Object.keys(manifest.exports)
+      .map((subpath) =>
+        subpath === "." ? "@hasna/identities" : `@hasna/identities/${subpath.slice(2)}`
+      )
+      .sort();
+
+    expect(importedSpecifiers).toEqual(expectedSpecifiers);
+    expect(fixture).not.toContain("skipLibCheck");
+  });
+
+  test("rejects branch, tag, short, uppercase, and file specs before invoking an installer", async () => {
+    const invalidSpecs = [
+      "github:hasna/identities#main",
+      "github:hasna/identities#v0.3.5",
+      "github:hasna/identities#0123456",
+      "github:hasna/identities#0123456789ABCDEF0123456789ABCDEF01234567",
+      "file:/tmp/identities-package.tgz",
+    ];
+
+    for (const spec of invalidSpecs) {
+      const harness = await createFakeBunHarness();
+      const result = runVerifier(spec, harness);
+      expect(result.exitCode, spec).not.toBe(0);
+      expect(result.stderr.toString(), spec).toContain(
+        "--spec must be github:hasna/identities# followed by a 40-character lowercase commit SHA",
+      );
+      expect(await pathExists(harness.capturePath), `${spec} invoked the installer`).toBe(false);
+    }
+  });
+
+  test("isolates child config and propagates an exact-SHA installer failure", async () => {
+    const harness = await createFakeBunHarness();
+    const hostMarker = "host-configuration-marker";
+    const result = runVerifier(
+      "github:hasna/identities#0123456789abcdef0123456789abcdef01234567",
+      harness,
+      {
+        BUN_INSTALL_CACHE_DIR: `/tmp/${hostMarker}-bun-cache`,
+        BUN_CONFIG_VERBOSE_FETCH: hostMarker,
+        HOME: `/tmp/${hostMarker}-home`,
+        NODE_EXTRA_CA_CERTS: `/tmp/${hostMarker}-node-ca.pem`,
+        NODE_OPTIONS: `--require=/tmp/${hostMarker}-node-hook.cjs`,
+        NODE_PATH: `/tmp/${hostMarker}-node-path`,
+        NPM_CONFIG_CACHE: `/tmp/${hostMarker}-npm-cache`,
+        NPM_CONFIG_USERCONFIG: `/tmp/${hostMarker}-npmrc`,
+        XDG_CACHE_HOME: `/tmp/${hostMarker}-xdg-cache`,
+        XDG_CONFIG_HOME: `/tmp/${hostMarker}-xdg-config`,
+      },
+    );
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain("failed with 37");
+    const captured = await readFile(harness.capturePath, "utf8");
+    expect(captured).not.toContain(hostMarker);
+    expect(captured).toContain("HOME=");
+    expect(captured).toContain("identities-package-consumers-");
   });
 
   for (const moduleResolution of ["Bundler", "NodeNext"] as const) {
@@ -151,6 +234,7 @@ function sourceEntrypoint(subpath: string): string {
 async function stageSourceOnlyConsumer(): Promise<string> {
   const consumerRoot = await mkdtemp(join(tmpdir(), "identities-source-install-"));
   temporaryRoots.push(consumerRoot);
+  await preparePackageConsumerEnvironment(consumerRoot);
 
   const nodeModules = join(consumerRoot, "node_modules");
   const packageDirectory = join(nodeModules, "@hasna", "identities");
@@ -180,14 +264,14 @@ async function stageSourceOnlyConsumer(): Promise<string> {
 }
 
 function isolatedEnvironment(root: string): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = { ...process.env };
-  for (const name of Object.keys(env)) {
-    if (/(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|DATABASE_URL|API_URL)$/i.test(name)) {
-      env[name] = undefined;
-    }
-  }
-  env.OPEN_IDENTITIES_STORE = join(root, "identities.json");
-  return env;
+  return {
+    ...isolatedPackageConsumerEnvironment(root),
+    HASNA_IDENTITIES_DATABASE_URL: undefined,
+    HASNA_IDENTITIES_STORAGE_MODE: "local",
+    IDENTITIES_DATABASE_URL: undefined,
+    IDENTITIES_STORAGE_MODE: undefined,
+    OPEN_IDENTITIES_STORE: join(root, "identities.json"),
+  };
 }
 
 function commandResult(result: Bun.SpawnSyncReturns<Buffer, Buffer>): {
@@ -200,4 +284,73 @@ function commandResult(result: Bun.SpawnSyncReturns<Buffer, Buffer>): {
     stderr: result.stderr.toString().trim(),
     stdout: result.stdout.toString().trim(),
   };
+}
+
+interface FakeBunHarness {
+  capturePath: string;
+  directory: string;
+}
+
+async function createFakeBunHarness(): Promise<FakeBunHarness> {
+  const directory = await mkdtemp(join(tmpdir(), "identities-fake-bun-"));
+  temporaryRoots.push(directory);
+  const capturePath = join(directory, "child.env");
+  const executable = join(directory, "bun");
+  const shellCapturePath = capturePath.replaceAll("'", "'\\''");
+  await writeFile(
+    executable,
+    [
+      "#!/bin/sh",
+      "{",
+      "  printf 'HOME=%s\\n' \"${HOME-}\"",
+      "  printf 'XDG_CONFIG_HOME=%s\\n' \"${XDG_CONFIG_HOME-}\"",
+      "  printf 'XDG_CACHE_HOME=%s\\n' \"${XDG_CACHE_HOME-}\"",
+      "  printf 'NPM_CONFIG_USERCONFIG=%s\\n' \"${NPM_CONFIG_USERCONFIG-}\"",
+      "  printf 'NPM_CONFIG_CACHE=%s\\n' \"${NPM_CONFIG_CACHE-}\"",
+      "  printf 'BUN_INSTALL_CACHE_DIR=%s\\n' \"${BUN_INSTALL_CACHE_DIR-}\"",
+      "  printf 'BUN_CONFIG_VERBOSE_FETCH=%s\\n' \"${BUN_CONFIG_VERBOSE_FETCH-}\"",
+      "  printf 'NODE_OPTIONS=%s\\n' \"${NODE_OPTIONS-}\"",
+      "  printf 'NODE_PATH=%s\\n' \"${NODE_PATH-}\"",
+      "  printf 'NODE_EXTRA_CA_CERTS=%s\\n' \"${NODE_EXTRA_CA_CERTS-}\"",
+      `} > '${shellCapturePath}'`,
+      "exit 37",
+      "",
+    ].join("\n"),
+  );
+  await chmod(executable, 0o755);
+  return { capturePath, directory };
+}
+
+function runVerifier(
+  spec: string,
+  harness: FakeBunHarness,
+  extraEnv: Record<string, string> = {},
+): Bun.SpawnSyncReturns<Buffer, Buffer> {
+  return Bun.spawnSync({
+    cmd: [
+      process.execPath,
+      join(packageRoot, "scripts", "verify-package-consumers.ts"),
+      "--spec",
+      spec,
+    ],
+    cwd: packageRoot,
+    env: {
+      ...process.env,
+      ...extraEnv,
+      PATH: `${harness.directory}:${process.env["PATH"] ?? ""}`,
+    },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 }

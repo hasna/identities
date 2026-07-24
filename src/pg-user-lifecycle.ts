@@ -1,6 +1,10 @@
 import type { QueryResultRow } from "pg";
-import type { PoolQueryClient, TypedQueryClient } from "./generated/storage-kit/query.js";
+import type { TypedQueryClient } from "./generated/storage-kit/query.js";
 import { hashOpaqueClaim, type IdentitySessionFamilyStatus } from "./identity-auth.js";
+import {
+  restrictTransactionalQueryClient,
+  type TransactionalQueryClient,
+} from "./transactional-query-client.js";
 import {
   IDENTITY_INVITES_TABLE,
   IDENTITY_ISSUED_ACCESS_TOKENS_TABLE,
@@ -161,7 +165,11 @@ function lifecycleFailure(
 }
 
 export class PgIdentityLifecycleStore implements IdentityLifecycleStore {
-  constructor(private readonly client: PoolQueryClient) {}
+  private readonly client: TransactionalQueryClient;
+
+  constructor(client: TransactionalQueryClient) {
+    this.client = restrictTransactionalQueryClient(client);
+  }
 
   async prepare(): Promise<IdentityLoginIdentifierCanonicalizationAudit> {
     let audit: IdentityLoginIdentifierCanonicalizationAudit;
